@@ -68,12 +68,15 @@ queue — there is no separate "who am I" endpoint. Realtor status always goes t
 
 ### Run locally
 
+The app lives in this `ourmtg/` subdirectory; the deploy config is the repo-root
+`netlify.toml` (`base = "ourmtg"`), so run `netlify dev` from the repo root.
+
 ```bash
-npm install
+cd ourmtg && npm install
 cp .env.example .env        # set VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY (+ server vars)
-netlify dev                 # SPA + functions on one origin (recommended)
-# or: npm run dev           # SPA only; set VITE_API_BASE to a deployed functions base
-npm run build               # production build to dist/
+cd .. && netlify dev        # SPA + functions on one origin (reads root netlify.toml)
+# or, SPA only: cd ourmtg && npm run dev  (set VITE_API_BASE to a deployed functions base)
+# production build:         cd ourmtg && npm run build   → ourmtg/dist/
 ```
 
 ## Setup

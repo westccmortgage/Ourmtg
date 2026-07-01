@@ -1,0 +1,17 @@
+# OurMTG lives in the ourmtg/ subdirectory. Netlify reads netlify.toml from the repo
+# root, so this file points the build at that subdirectory via `base`. With base set,
+# `command` runs inside ourmtg/ and `publish`/`functions` resolve relative to it
+# (→ ourmtg/dist and ourmtg/netlify/functions).
+[build]
+  base = "ourmtg"
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+# SPA history fallback: client-side routing (react-router) serves index.html for any
+# non-file, non-function path. Netlify resolves /.netlify/functions/* and real assets
+# BEFORE this catch-all, so the API and static files are never shadowed.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
