@@ -1,0 +1,4 @@
+# OurMTG — Netlify serverless functions.
+# Scheduled functions (cron) self-register via each function's `export const config`.
+[build]
+  functions = "netlify/functions"

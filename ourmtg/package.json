@@ -1,0 +1,15 @@
+{
+  "name": "ourmtg",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OurMTG — borrower/Realtor/processor operating layer on top of GRCRM (source of truth) + WCCI.online (AI strategy).",
+  "type": "module",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "check": "for f in netlify/functions/*.mjs netlify/functions/_lib/*.mjs; do node --check \"$f\"; done && echo ok"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.107.0",
+    "nodemailer": "^6.9.0"
+  }
+}
