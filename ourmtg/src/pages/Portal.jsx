@@ -9,7 +9,7 @@ import BorrowerDashboard from './BorrowerDashboard'
 import RealtorPortal from './RealtorPortal'
 import LODashboard from './LODashboard'
 
-const ROLE_LABEL = { borrower: 'My loan', realtor: 'Realtor portal', lo: 'Loan officer' }
+const ROLE_LABEL = { borrower: 'My loan', realtor: 'Partner portal', lo: 'Loan team' }
 
 export default function Portal() {
   const { loading, error, roles, grants, ownedFiles } = useRole()
@@ -48,7 +48,7 @@ export default function Portal() {
         </div>
       )}
       {active === 'borrower' && <BorrowerDashboard grants={grants.filter((g) => g.visibility === 'borrower' || g.visibility === 'coborrower')} />}
-      {active === 'realtor' && <RealtorPortal grants={grants.filter((g) => g.visibility === 'realtor')} />}
+      {active === 'realtor' && <RealtorPortal grants={grants.filter((g) => ['realtor', 'escrow', 'title'].includes(g.visibility))} />}
       {active === 'lo' && <LODashboard files={ownedFiles} />}
     </>
   )

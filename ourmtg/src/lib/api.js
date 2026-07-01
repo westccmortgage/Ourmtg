@@ -72,6 +72,21 @@ export const setPreapproval = (loanFileId, amount, expires) =>
 export const createInvite = (payload) =>
   call('portal-invite-create', { method: 'POST', body: payload })
 
+export const requestDoc = (loanFileId, label, who) =>
+  call('portal-doc-request', { method: 'POST', body: { loanFileId, label, who } })
+
+export const setCondition = (payload) =>
+  call('portal-condition-set', { method: 'POST', body: payload })
+
+export const sendMessage = (loanFileId, body) =>
+  call('portal-message-send', { method: 'POST', body: { loanFileId, body } })
+
+export const teamList = () => call('portal-team-set')
+export const teamAdd = (email, role) =>
+  call('portal-team-set', { method: 'POST', body: { action: 'add', email, role } })
+export const teamRemove = (memberUserId) =>
+  call('portal-team-set', { method: 'POST', body: { action: 'remove', memberUserId } })
+
 // ── Direct RLS reads the gateway doesn't expose (borrower/co-borrower only) ───
 // portal_access is readable by the user (own-grants RLS policy) — this is how the app
 // discovers which loan files to show and at what visibility.

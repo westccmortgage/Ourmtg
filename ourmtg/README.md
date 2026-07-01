@@ -27,6 +27,8 @@ src/                          Vite + React SPA (mobile-first) — the OurMTG sit
 supabase/migrations/
   036_ourmtg_portal.sql     Projection tables + RLS + private ourmtg-docs bucket
   037_portal_invites.sql    Tokenized, expiring portal_access invites
+  038_ourmtg_team_and_requests.sql  Team access (processor/assistant), escrow/title
+                            roles, loan_messages RLS hardening
 netlify/functions/
   sync-loan-file.mjs          Projector: GRCRM wcci-deals -> loan_files (cron, every 5m)
   lead-submit.mjs             Public proxy: forwards intake/referral to GRCRM lead-inbound
@@ -41,7 +43,11 @@ netlify/functions/
   portal-preapproval-set.mjs  LO issues/clears pre-approval shown to Realtors (owner-only)
   portal-review-queue.mjs     LO queue: missing docs, pending review, stuck files (owner-only)
   portal-status.mjs           Read-only tracker (borrower full / realtor milestone-only)
-  portal-checklist.mjs        Required vs uploaded docs (LO internal notes separated)
+  portal-checklist.mjs        Required + ad-hoc docs vs uploaded (LO notes separated)
+  portal-doc-request.mjs      LO/processor requests an ad-hoc document (internal)
+  portal-condition-set.mjs    LO/processor creates/updates/clears UW conditions (internal)
+  portal-message-send.mjs     Two-way borrower <-> loan-team messaging (+ email nudge)
+  portal-team-set.mjs         LO manages processors/assistants (portal_team, owner-only)
   _lib/                       Shared helpers (self-contained copies)
 docs/
   OURMTG_SPEC.md            Full product + technical spec (A–P)

@@ -5,9 +5,10 @@
 // flag, and a one-line next action. This is the DATA endpoint behind the future LO
 // dashboard — no UI here.
 //
-// SECURITY: owner-scoped only (loan_files.owner_user_id = caller). Reads loan_files /
-// loan_documents / loan_conditions / loan_messages ONLY — never app_state, never
-// another owner's files.
+// SECURITY: internal-scoped — files the caller OWNS plus files of any owner the caller
+// is a portal_team member of (processor/assistant). Reads loan_files / loan_documents /
+// loan_conditions / loan_messages / portal_team ONLY — never app_state, never files of
+// unrelated owners.
 
 import { admin, isConfigured } from './_lib/supabase.mjs'
 import { authUser, json, preflight, stageInfo } from './_lib/portal.mjs'
@@ -28,10 +29,19 @@ export default async (req) => {
 
   const svc = admin()
 
+  // Owner set = self + every owner this caller is on the team of (038; tolerate the
+  // table not existing yet so pre-migration deploys keep working owner-only).
+  const ownerIds = [auth.user.id]
+  const { data: memberships, error: tErr } = await svc
+    .from('portal_team')
+    .select('owner_user_id')
+    .eq('member_user_id', auth.user.id)
+  if (!tErr) for (const m of memberships || []) ownerIds.push(m.owner_user_id)
+
   const { data: files, error: fErr } = await svc
     .from('loan_files')
     .select('*')
-    .eq('owner_user_id', auth.user.id)
+    .in('owner_user_id', ownerIds)
     .order('updated_at', { ascending: false })
   if (fErr) return json({ ok: false, error: 'Database error' }, 500)
 
@@ -64,7 +74,12 @@ export default async (req) => {
     const required = checklistFor({ loanType: f.loan_type, purpose: f.purpose })
     const fileDocs = docsByFile.get(f.id) || []
     const doneKeys = new Set(fileDocs.filter((d) => ['uploaded', 'accepted'].includes(d.status)).map((d) => d.doc_key))
-    const missingDocs = required.filter((r) => !doneKeys.has(r.doc_key)).length
+    const requiredKeys = new Set(required.map((r) => r.doc_key))
+    // Missing = standard checklist gaps + ad-hoc requests still awaiting an upload.
+    const customPending = fileDocs.filter(
+      (d) => !requiredKeys.has(d.doc_key) && ['requested', 'rejected'].includes(d.status),
+    ).length
+    const missingDocs = required.filter((r) => !doneKeys.has(r.doc_key)).length + customPending
     const pendingReview = fileDocs.filter((d) => d.status === 'uploaded').length
     const openConditions = openCondByFile.get(f.id) || 0
     const lastActivity = lastActivityByFile.get(f.id) || null

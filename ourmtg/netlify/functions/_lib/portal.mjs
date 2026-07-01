@@ -53,17 +53,30 @@ export async function loadLoanFile(svc, loanFileId) {
 }
 
 // Resolve the caller's relationship to a loan file.
-//   Returns { role, visibility, loanFile } where:
-//     role       = 'owner' | 'portal'
-//     visibility = 'owner' | 'borrower' | 'coborrower' | 'realtor'
+//   Returns { role, visibility, loanFile, teamRole? } where:
+//     role       = 'owner' | 'team' | 'portal'
+//     visibility = 'owner' | 'borrower' | 'coborrower' | 'realtor' | 'escrow' | 'title'
 //   or null if the caller has NO access to this file.
 //
 // Owner short-circuit: caller.id === loan_file.owner_user_id → full internal access.
+// Team short-circuit: a portal_team row (member of this file's owner) → same internal
+// access (visibility 'owner'), so processors/assistants work the file like the LO.
 // Otherwise a portal_access row must exist; its `visibility` is returned.
 export async function resolveAccess(svc, userId, loanFile) {
   if (!loanFile) return null
   if (userId === loanFile.owner_user_id) {
     return { role: 'owner', visibility: 'owner', loanFile }
+  }
+  const { data: team, error: tErr } = await svc
+    .from('portal_team')
+    .select('role')
+    .eq('member_user_id', userId)
+    .eq('owner_user_id', loanFile.owner_user_id)
+    .maybeSingle()
+  if (tErr && tErr.code !== '42P01') throw new Error('portal_team read: ' + tErr.message)
+  // 42P01 = table missing (migration 038 not applied yet) — degrade to pre-team behavior.
+  if (team) {
+    return { role: 'team', visibility: 'owner', teamRole: team.role, loanFile }
   }
   const { data, error } = await svc
     .from('portal_access')
@@ -76,10 +89,30 @@ export async function resolveAccess(svc, userId, loanFile) {
   return { role: 'portal', visibility: data.visibility, loanFile }
 }
 
+// True when the caller works the file from the inside (LO/owner or their team) —
+// gates review, invites, pre-approval, doc requests, condition management.
+export function isInternal(access) {
+  return !!access && (access.role === 'owner' || access.role === 'team')
+}
+
 // True when a visibility level is allowed to touch borrower financial data
-// (documents, conditions, full status). Realtors are always excluded.
+// (documents, conditions, full status). Realtors/escrow/title are always excluded.
 export function canSeeFinancials(visibility) {
   return visibility === 'owner' || visibility === 'borrower' || visibility === 'coborrower'
+}
+
+// Email addresses of the borrower/co-borrower portal users on a loan file — the
+// standard "notify the borrower side" recipient list (fail-soft callers).
+export async function borrowerEmails(svc, loanFileId) {
+  const { data: grants } = await svc
+    .from('portal_access')
+    .select('portal_user')
+    .eq('loan_file_id', loanFileId)
+    .in('visibility', ['borrower', 'coborrower'])
+  const ids = (grants || []).map((g) => g.portal_user)
+  if (!ids.length) return []
+  const { data: people } = await svc.from('portal_users').select('email').in('id', ids)
+  return (people || []).map((p) => p.email).filter(Boolean)
 }
 
 // Append an audit row. Never throws (audit must not break the action).

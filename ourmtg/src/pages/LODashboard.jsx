@@ -1,11 +1,12 @@
 // Loan officer command center (spec §K.10, §F.7). Built on portal-review-queue: pipeline
 // snapshot, a stuck-files panel, and a table of every active file with missing-doc /
 // pending-review / open-condition counts and the single next action. Row → file detail.
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { teamList, teamAdd, teamRemove } from '../lib/api'
 import { money, shortDate, relTime } from '../lib/format'
 import { STAGE_LABEL, STAGE_STEPS } from '../lib/pipeline'
-import { Empty } from '../components/ui'
+import { Alert, Empty } from '../components/ui'
 
 export default function LODashboard({ files }) {
   const navigate = useNavigate()
@@ -89,6 +90,73 @@ export default function LODashboard({ files }) {
         )}
         <p className="hint" style={{ marginTop: 12 }}>Amounts and pre-approval are managed inside each file. Tap a row to review documents, set pre-approval, or invite the borrower/realtor.</p>
       </div>
+
+      <TeamCard />
     </>
+  )
+}
+
+// My team: processors/assistants who get internal access to every file I own.
+// Add requires the person to have signed in once (magic link) so their account exists.
+function TeamCard() {
+  const [members, setMembers] = useState(null)
+  const [email, setEmail] = useState('')
+  const [role, setRole] = useState('processor')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const load = () => teamList().then((r) => setMembers(r.members || [])).catch(() => setMembers([]))
+  useEffect(() => { load() }, [])
+
+  async function add(e) {
+    e.preventDefault()
+    setBusy(true); setError('')
+    try {
+      await teamAdd(email.trim(), role)
+      setEmail('')
+      await load()
+    } catch (err) { setError(err?.message || 'Could not add team member.') }
+    finally { setBusy(false) }
+  }
+
+  async function remove(memberUserId) {
+    setBusy(true)
+    try { await teamRemove(memberUserId); await load() } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="card">
+      <div className="card-head"><h2>My team</h2></div>
+      <p className="muted mt0">Processors and assistants see and work every file you own — review queue, documents, conditions, invites.</p>
+      {members === null && <Empty>Loading…</Empty>}
+      {members && members.length === 0 && <Empty>No team members yet.</Empty>}
+      {members && members.map((m) => (
+        <div className="row" key={m.memberUserId}>
+          <div className="grow">
+            <div className="rlabel">{m.email || m.memberUserId}</div>
+            <div className="rsub">{m.role}</div>
+          </div>
+          <button className="btn btn-danger btn-sm" disabled={busy} onClick={() => remove(m.memberUserId)}>Remove</button>
+        </div>
+      ))}
+      <form onSubmit={add} style={{ marginTop: 14, borderTop: '1px solid var(--line)', paddingTop: 14 }}>
+        <Alert kind="error">{error}</Alert>
+        <div className="grid2">
+          <div className="field">
+            <label htmlFor="tm-email">Email</label>
+            <input id="tm-email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} inputMode="email" />
+          </div>
+          <div className="field">
+            <label htmlFor="tm-role">Role</label>
+            <select id="tm-role" value={role} onChange={(e) => setRole(e.target.value)}>
+              <option value="processor">Processor</option>
+              <option value="assistant">Assistant</option>
+            </select>
+          </div>
+        </div>
+        <button className="btn btn-navy btn-sm" disabled={busy || !email}>{busy ? 'Adding…' : 'Add team member'}</button>
+        <p className="hint" style={{ marginTop: 8, marginBottom: 0 }}>They must sign in once at this site first (magic link) so their account exists.</p>
+      </form>
+    </div>
   )
 }

@@ -15,7 +15,7 @@
 //     portal_access to this file, so the update is actually seen, not just stored.
 
 import { admin, isConfigured } from './_lib/supabase.mjs'
-import { authUser, json, preflight, loadLoanFile, resolveAccess, logAccess } from './_lib/portal.mjs'
+import { authUser, json, preflight, loadLoanFile, resolveAccess, isInternal, logAccess } from './_lib/portal.mjs'
 import { sendPlatformEmail, brandedEmail, esc } from './_lib/mailer.mjs'
 
 const OURMTG_URL = (process.env.OURMTG_URL || 'https://ourmtg.com').replace(/\/$/, '')
@@ -67,7 +67,7 @@ export default async (req) => {
     return json({ ok: false, error: 'Database error' }, 500)
   }
   if (!loanFile) return json({ ok: false, error: 'Loan file not found' }, 404)
-  if (!access || access.role !== 'owner') {
+  if (!isInternal(access)) {
     return json({ ok: false, error: 'Not authorized for this loan file' }, 403)
   }
 

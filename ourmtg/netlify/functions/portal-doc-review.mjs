@@ -17,7 +17,7 @@
 //     resets an existing loan_documents row (matched by doc_key) back to 'requested'.
 
 import { admin, isConfigured } from './_lib/supabase.mjs'
-import { authUser, json, preflight, loadLoanFile, resolveAccess, logAccess } from './_lib/portal.mjs'
+import { authUser, json, preflight, loadLoanFile, resolveAccess, isInternal, logAccess } from './_lib/portal.mjs'
 import { sendPlatformEmail, brandedEmail, esc } from './_lib/mailer.mjs'
 
 const OURMTG_URL = (process.env.OURMTG_URL || 'https://ourmtg.com').replace(/\/$/, '')
@@ -60,7 +60,7 @@ export default async (req) => {
     console.error('[portal-doc-review]', e.message)
     return json({ ok: false, error: 'Database error' }, 500)
   }
-  if (!access || access.role !== 'owner') {
+  if (!isInternal(access)) {
     return json({ ok: false, error: 'Not authorized for this loan file' }, 403)
   }
   if (doc.status !== 'uploaded') {

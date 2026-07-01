@@ -33,7 +33,7 @@ export default function RealtorPortal({ grants }) {
 
   return (
     <>
-      <h1>Realtor portal</h1>
+      <h1>Partner portal</h1>
 
       <div className="card">
         <div className="card-head"><h2>Your referred buyers</h2>{buyers && <span className="chip gray">{buyers.length}</span>}</div>

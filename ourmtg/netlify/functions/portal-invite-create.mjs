@@ -15,10 +15,10 @@
 //     is always returned so the LO can deliver it another way.
 
 import { admin, isConfigured } from './_lib/supabase.mjs'
-import { authUser, json, preflight, logAccess, randomToken } from './_lib/portal.mjs'
+import { authUser, json, preflight, resolveAccess, isInternal, logAccess, randomToken } from './_lib/portal.mjs'
 import { sendPlatformEmail, brandedEmail, esc } from './_lib/mailer.mjs'
 
-const ROLES = new Set(['borrower', 'coborrower', 'realtor'])
+const ROLES = new Set(['borrower', 'coborrower', 'realtor', 'escrow', 'title'])
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const OURMTG_URL = (process.env.OURMTG_URL || 'https://ourmtg.com').replace(/\/$/, '')
 
@@ -45,12 +45,13 @@ export default async (req) => {
 
   const svc = admin()
 
-  // Load the loan file and authorize: caller must own it.
+  // Load the loan file and authorize: caller must be internal (owner or their team).
   const { data: loanFile, error: lfErr } = await svc
     .from('loan_files').select('id, owner_user_id, borrower_name').eq('id', loanFileId).maybeSingle()
   if (lfErr) return json({ ok: false, error: 'Database error' }, 500)
   if (!loanFile) return json({ ok: false, error: 'Loan file not found' }, 404)
-  if (loanFile.owner_user_id !== auth.user.id) {
+  const access = await resolveAccess(svc, auth.user.id, loanFile).catch(() => null)
+  if (!isInternal(access)) {
     return json({ ok: false, error: 'Not authorized for this loan file' }, 403)
   }
 
@@ -83,7 +84,9 @@ export default async (req) => {
   // Best-effort email delivery (fail-soft — the link is returned regardless).
   let emailed = false
   if (email) {
-    const roleWord = role === 'realtor' ? 'track your buyer’s loan' : 'start and track your loan'
+    const roleWord = role === 'realtor' ? 'track your buyer’s loan'
+      : (role === 'escrow' || role === 'title') ? 'track this transaction’s milestones'
+      : 'start and track your loan'
     const html = brandedEmail({
       heading: 'Your secure loan portal is ready',
       intro: `You’ve been invited to ${esc(roleWord)} securely with West Coast Capital Mortgage.`,

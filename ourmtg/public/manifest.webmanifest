@@ -1,0 +1,12 @@
+{
+  "name": "OurMTG — West Coast Capital Mortgage",
+  "short_name": "OurMTG",
+  "description": "Your secure loan portal: track status, upload documents, stay on schedule.",
+  "start_url": "/portal",
+  "display": "standalone",
+  "background_color": "#f3f4f6",
+  "theme_color": "#1e3a5f",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

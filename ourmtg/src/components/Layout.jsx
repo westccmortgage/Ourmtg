@@ -15,6 +15,11 @@ export function ComplianceFooter() {
         <p className="eho">🏠 Equal Housing Opportunity · {BRAND.company}</p>
         {nmls && <p>{nmls}</p>}
         <p>
+          Office: <a href={`tel:${BRAND.officePhone}`}>{BRAND.officePhone}</a>
+          {BRAND.loPhone && <> · {BRAND.loName || 'Direct'}: <a href={`tel:${BRAND.loPhone}`}>{BRAND.loPhone}</a></>}
+          {BRAND.email && <> · <a href={`mailto:${BRAND.email}`}>{BRAND.email}</a></>}
+        </p>
+        <p>
           <Link to="/legal/privacy">Privacy Policy</Link> · <Link to="/legal/terms">Terms of Use</Link>
         </p>
         <p className="disc">

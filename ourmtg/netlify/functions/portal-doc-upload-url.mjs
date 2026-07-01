@@ -55,8 +55,15 @@ export default async (req) => {
     return json({ ok: false, error: 'Not permitted to upload documents' }, 403)
   }
 
-  // Validate the doc slot against the file's checklist.
-  if (!isValidDocKey({ loanType: loanFile.loan_type, purpose: loanFile.purpose }, docKey)) {
+  // Validate the doc slot: either a standard checklist item for this loan type, or an
+  // existing loan_documents row (an ad-hoc request created via portal-doc-request).
+  // Look up the existing row first — it doubles as the custom-key allowlist.
+  const { data: existing } = await svc
+    .from('loan_documents')
+    .select('id, label')
+    .eq('loan_file_id', loanFileId).eq('doc_key', docKey)
+    .maybeSingle()
+  if (!existing && !isValidDocKey({ loanType: loanFile.loan_type, purpose: loanFile.purpose }, docKey)) {
     return json({ ok: false, error: 'Unknown document type for this loan' }, 400)
   }
 
@@ -74,14 +81,10 @@ export default async (req) => {
 
   // Upsert the loan_documents row for this (loanFile, docKey): point it at the new
   // path, reset to 'requested' until the client confirms completion. One slot per
-  // docKey (re-upload replaces). Find existing first (no unique constraint on the pair).
-  const label = labelForDocKey({ loanType: loanFile.loan_type, purpose: loanFile.purpose }, docKey)
+  // docKey (re-upload replaces). Custom requests keep their LO-written label.
+  const label = existing?.label
+    || labelForDocKey({ loanType: loanFile.loan_type, purpose: loanFile.purpose }, docKey)
   let documentId
-  const { data: existing } = await svc
-    .from('loan_documents')
-    .select('id')
-    .eq('loan_file_id', loanFileId).eq('doc_key', docKey)
-    .maybeSingle()
 
   if (existing) {
     documentId = existing.id

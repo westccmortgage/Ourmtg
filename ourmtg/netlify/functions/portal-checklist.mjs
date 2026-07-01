@@ -12,7 +12,7 @@
 
 import { admin, isConfigured } from './_lib/supabase.mjs'
 import {
-  authUser, json, preflight, loadLoanFile, resolveAccess, canSeeFinancials, logAccess,
+  authUser, json, preflight, loadLoanFile, resolveAccess, canSeeFinancials, isInternal, logAccess,
 } from './_lib/portal.mjs'
 import { checklistFor } from './_lib/checklist.mjs'
 
@@ -44,7 +44,7 @@ export default async (req) => {
     return json({ ok: false, error: 'Not permitted to view the checklist' }, 403)
   }
 
-  const isOwner = access.role === 'owner'
+  const isOwner = isInternal(access) // owner OR team member (processor/assistant)
 
   // Required items from the file's loan type / purpose.
   const required = checklistFor({ loanType: loanFile.loan_type, purpose: loanFile.purpose })
@@ -52,11 +52,13 @@ export default async (req) => {
   // Existing document rows for this file, keyed by doc_key.
   const { data: docs, error: dErr } = await svc
     .from('loan_documents')
-    .select('doc_key, status, uploaded_at, reject_reason')
+    .select('doc_key, label, who, status, uploaded_at, reject_reason')
     .eq('loan_file_id', loanFileId)
+    .order('requested_at', { ascending: true })
   if (dErr) return json({ ok: false, error: 'Database error' }, 500)
 
   const byKey = new Map((docs || []).map((d) => [d.doc_key, d]))
+  const requiredKeys = new Set(required.map((it) => it.doc_key))
 
   const items = required.map((it) => {
     const row = byKey.get(it.doc_key)
@@ -73,6 +75,22 @@ export default async (req) => {
     if (isOwner) base.internalNote = it.internal || null
     return base
   })
+
+  // Ad-hoc requests (portal-doc-request) — rows whose doc_key isn't in the standard
+  // checklist. Appended after the standard items so the borrower sees them too.
+  for (const d of docs || []) {
+    if (requiredKeys.has(d.doc_key)) continue
+    const extra = {
+      docKey: d.doc_key,
+      label: d.label || d.doc_key,
+      who: d.who || 'borrower',
+      status: d.status,
+      uploadedAt: d.uploaded_at || null,
+      rejectReason: d.status === 'rejected' ? (d.reject_reason || null) : null,
+    }
+    if (isOwner) extra.internalNote = null
+    items.push(extra)
+  }
 
   const uploaded = items.filter((i) => ['uploaded', 'accepted'].includes(i.status)).length
 

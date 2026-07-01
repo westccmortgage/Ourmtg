@@ -21,7 +21,8 @@ export function useRole() {
         const ownedFiles = queue?.files || []
         const roles = []
         if (grants.some((g) => g.visibility === 'borrower' || g.visibility === 'coborrower')) roles.push('borrower')
-        if (grants.some((g) => g.visibility === 'realtor')) roles.push('realtor')
+        // Partner group: realtor + third-party milestone-only roles (escrow/title).
+        if (grants.some((g) => ['realtor', 'escrow', 'title'].includes(g.visibility))) roles.push('realtor')
         if (ownedFiles.length) roles.push('lo')
         setState({ loading: false, error: '', roles, grants, ownedFiles })
       } catch (err) {

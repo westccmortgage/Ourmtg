@@ -4,9 +4,11 @@
 // files via a compact selector, though most borrowers have exactly one.
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { getStatus, getChecklist, listConditions } from '../lib/api'
+import { getStatus, getChecklist, listConditions, listMessages } from '../lib/api'
+import { BRAND } from '../lib/config'
 import { money, shortDate } from '../lib/format'
 import StatusTracker from '../components/StatusTracker'
+import MessageThread from '../components/MessageThread'
 import { Alert, Spinner, StatusChip, Empty } from '../components/ui'
 
 export default function BorrowerDashboard({ grants }) {
@@ -23,9 +25,10 @@ export default function BorrowerDashboard({ grants }) {
       getStatus(active),
       getChecklist(active).catch(() => null),
       listConditions(active).catch(() => []),
+      listMessages(active).catch(() => []),
     ])
-      .then(([status, checklist, conditions]) => {
-        if (alive) setData({ status, checklist, conditions })
+      .then(([status, checklist, conditions, messages]) => {
+        if (alive) setData({ status, checklist, conditions, messages })
       })
       .catch((err) => { if (alive) setError(err?.message || 'Could not load your loan.') })
       .finally(() => { if (alive) setLoading(false) })
@@ -36,8 +39,10 @@ export default function BorrowerDashboard({ grants }) {
   if (error) return <Alert kind="error">{error}</Alert>
   if (!data) return null
 
-  const { status, checklist, conditions } = data
+  const { status, checklist, conditions, messages } = data
   const openConditions = (conditions || []).filter((c) => c.status !== 'cleared')
+  const reloadMessages = () =>
+    listMessages(active).then((m) => setData((d) => ({ ...d, messages: m }))).catch(() => {})
 
   return (
     <>
@@ -93,8 +98,28 @@ export default function BorrowerDashboard({ grants }) {
           </div>
         ))}
         {openConditions.length > 0 && (
-          <p className="hint" style={{ marginTop: 12 }}>To satisfy a condition, upload the requested item on your Documents page or reply to your loan officer.</p>
+          <p className="hint" style={{ marginTop: 12 }}>To satisfy a condition, upload the requested item on your Documents page or message your loan team below.</p>
         )}
+      </div>
+
+      <div className="card">
+        <div className="card-head"><h2>Messages</h2></div>
+        <MessageThread loanFileId={active} messages={messages} onSent={reloadMessages}
+          placeholder="Ask your loan team anything…" />
+      </div>
+
+      <div className="card">
+        <div className="card-head"><h2>Your team</h2></div>
+        <div className="row">
+          <div className="grow">
+            <div className="rlabel">{BRAND.company}</div>
+            <div className="rsub">
+              Office <a href={`tel:${BRAND.officePhone}`}>{BRAND.officePhone}</a>
+              {BRAND.loPhone && <> · {BRAND.loName || 'Direct'} <a href={`tel:${BRAND.loPhone}`}>{BRAND.loPhone}</a></>}
+            </div>
+          </div>
+          <a className="btn btn-ghost btn-sm" href={`tel:${BRAND.loPhone || BRAND.officePhone}`}>Call</a>
+        </div>
       </div>
     </>
   )

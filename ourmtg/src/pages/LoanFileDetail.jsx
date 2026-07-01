@@ -6,9 +6,10 @@
 // All actions call owner-only gateway endpoints; the page reloads detail after each.
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { getFileDetail, reviewDoc, setPreapproval, createInvite } from '../lib/api'
+import { getFileDetail, reviewDoc, setPreapproval, createInvite, requestDoc, setCondition } from '../lib/api'
 import { money, shortDate, relTime } from '../lib/format'
 import StatusTracker from '../components/StatusTracker'
+import MessageThread from '../components/MessageThread'
 import { Alert, Spinner, StatusChip, Empty } from '../components/ui'
 
 function DocRow({ doc, onReview }) {
@@ -125,6 +126,8 @@ function InviteCard({ file }) {
               <option value="borrower">Borrower</option>
               <option value="coborrower">Co-borrower</option>
               <option value="realtor">Realtor</option>
+              <option value="escrow">Escrow (milestones only)</option>
+              <option value="title">Title (milestones only)</option>
             </select>
           </div>
           <div className="field">
@@ -186,6 +189,7 @@ export default function LoanFileDetail() {
         <div className="card-head"><h2>Documents</h2>{pending.length > 0 && <span className="chip amber">{pending.length} to review</span>}</div>
         {documents.length === 0 && <Empty>No documents requested or uploaded yet.</Empty>}
         {documents.map((d) => <DocRow key={d.id} doc={d} onReview={onReview} />)}
+        <RequestDocForm loanFileId={file.loanFileId} onCreated={load} />
       </div>
 
       <PreapprovalCard file={file} onSaved={load} />
@@ -194,29 +198,102 @@ export default function LoanFileDetail() {
       <div className="card">
         <div className="card-head"><h2>Conditions</h2></div>
         {conditions.length === 0 && <Empty>No underwriting conditions on file.</Empty>}
-        {conditions.map((c) => (
-          <div className="row" key={c.id}>
-            <div className="grow">
-              <div className="rlabel">{c.title}</div>
-              {c.detail && <div className="rsub">{c.detail}</div>}
-            </div>
-            <StatusChip status={c.status} />
-          </div>
-        ))}
+        {conditions.map((c) => <ConditionRow key={c.id} loanFileId={file.loanFileId} condition={c} onChanged={load} />)}
+        <AddConditionForm loanFileId={file.loanFileId} onCreated={load} />
       </div>
 
       <div className="card">
-        <div className="card-head"><h2>Timeline</h2></div>
-        {messages.length === 0 && <Empty>No activity yet.</Empty>}
-        {messages.map((m) => (
-          <div className="row" key={m.id}>
-            <div className="grow">
-              <div className="rlabel" style={{ fontWeight: 500, fontSize: 14 }}>{m.body}</div>
-              <div className="rsub">{m.author_role} · {relTime(m.created_at)}</div>
-            </div>
-          </div>
-        ))}
+        <div className="card-head"><h2>Messages & timeline</h2></div>
+        <MessageThread loanFileId={file.loanFileId} messages={messages} onSent={load}
+          placeholder="Message the borrower…" />
       </div>
     </>
+  )
+}
+
+function RequestDocForm({ loanFileId, onCreated }) {
+  const [label, setLabel] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  async function submit(e) {
+    e.preventDefault()
+    setBusy(true); setError('')
+    try {
+      await requestDoc(loanFileId, label.trim())
+      setLabel('')
+      await onCreated?.()
+    } catch (err) { setError(err?.message || 'Could not create the request.') }
+    finally { setBusy(false) }
+  }
+  return (
+    <form onSubmit={submit} style={{ marginTop: 14, borderTop: '1px solid var(--line)', paddingTop: 14 }}>
+      <Alert kind="error">{error}</Alert>
+      <div className="spread">
+        <div className="field" style={{ flex: 1, marginBottom: 0 }}>
+          <input value={label} onChange={(e) => setLabel(e.target.value)} maxLength={200}
+            placeholder="Request another document (e.g. “Letter of explanation — March deposit”)" />
+        </div>
+        <button className="btn btn-navy btn-sm" disabled={busy || label.trim().length < 3}>
+          {busy ? 'Requesting…' : 'Request'}
+        </button>
+      </div>
+      <p className="hint" style={{ marginTop: 8, marginBottom: 0 }}>Appears on the borrower’s checklist and emails them.</p>
+    </form>
+  )
+}
+
+function ConditionRow({ loanFileId, condition, onChanged }) {
+  const [busy, setBusy] = useState(false)
+  async function setStatus(status) {
+    setBusy(true)
+    try { await setCondition({ loanFileId, conditionId: condition.id, status }); await onChanged?.() }
+    finally { setBusy(false) }
+  }
+  return (
+    <div className="row">
+      <div className="grow">
+        <div className="rlabel">{condition.title}</div>
+        {condition.detail && <div className="rsub">{condition.detail}</div>}
+      </div>
+      <StatusChip status={condition.status} />
+      {condition.status !== 'cleared' && (
+        <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setStatus('cleared')}>
+          {busy ? '…' : 'Clear'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+function AddConditionForm({ loanFileId, onCreated }) {
+  const [title, setTitle] = useState('')
+  const [detail, setDetail] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  async function submit(e) {
+    e.preventDefault()
+    setBusy(true); setError('')
+    try {
+      await setCondition({ loanFileId, title: title.trim(), detail: detail.trim() || null })
+      setTitle(''); setDetail('')
+      await onCreated?.()
+    } catch (err) { setError(err?.message || 'Could not add the condition.') }
+    finally { setBusy(false) }
+  }
+  return (
+    <form onSubmit={submit} style={{ marginTop: 14, borderTop: '1px solid var(--line)', paddingTop: 14 }}>
+      <Alert kind="error">{error}</Alert>
+      <div className="field">
+        <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200}
+          placeholder="New condition title (borrower-friendly wording)" />
+      </div>
+      <div className="field">
+        <input value={detail} onChange={(e) => setDetail(e.target.value)} maxLength={2000}
+          placeholder="Detail (optional)" />
+      </div>
+      <button className="btn btn-navy btn-sm" disabled={busy || title.trim().length < 3}>
+        {busy ? 'Adding…' : 'Add condition'}
+      </button>
+    </form>
   )
 }
