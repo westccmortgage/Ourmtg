@@ -8,6 +8,16 @@
   publish = "dist"
   functions = "netlify/functions"
 
+[build.environment]
+  # Netlify's secrets scanner cross-matches the VALUES of env vars marked "secret"
+  # against the build output. The Supabase project URL and anon/publishable key are
+  # PUBLIC by design (they ship in every Supabase client bundle via the VITE_* vars,
+  # which hold the same values) — exclude them from scanning so their legitimate
+  # presence in dist/ doesn't fail the build. SUPABASE_SERVICE_ROLE is deliberately
+  # NOT listed: it must never appear in build output, and the scanner enforcing that
+  # is protection we want to keep.
+  SECRETS_SCAN_OMIT_KEYS = "SUPABASE_URL,SUPABASE_ANON_KEY,VITE_SUPABASE_URL,VITE_SUPABASE_ANON_KEY"
+
 # SPA history fallback: client-side routing (react-router) serves index.html for any
 # non-file, non-function path. Netlify resolves /.netlify/functions/* and real assets
 # BEFORE this catch-all, so the API and static files are never shadowed.
