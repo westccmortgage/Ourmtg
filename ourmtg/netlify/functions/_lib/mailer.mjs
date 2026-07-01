@@ -10,13 +10,13 @@
 //   • All user-supplied strings MUST be passed through esc() before interpolation.
 import nodemailer from 'nodemailer'
 
-// Send from admin@grcrm.com — the one mailbox we actually have connected and
-// monitor. Resend authenticates the whole grcrm.com domain (DKIM/SPF), so the
-// address just needs to be on that domain; we use the real monitored inbox so
-// when a broker REPLIES to a notification ("got a question about this lead") it
-// reaches a human instead of vanishing into a no-reply void.
-const FROM = 'GR CRM <admin@grcrm.com>'
-const APP_URL = 'https://grcrm.com'
+// Sender is configurable: MAIL_FROM must be an address on a domain VERIFIED in the
+// Resend account (DKIM/SPF), or sends fail. Default reuses grcrm.com (already
+// verified for the shared RESEND_PLATFORM_KEY) but with the borrower-facing brand
+// as the display name. Once ourmtg.com is verified in Resend, set
+// MAIL_FROM='West Coast Capital Mortgage <hello@ourmtg.com>'.
+const FROM = process.env.MAIL_FROM || 'West Coast Capital Mortgage <admin@grcrm.com>'
+const APP_URL = (process.env.OURMTG_URL || 'https://ourmtg.com').replace(/\/$/, '')
 
 export function esc(str) {
   return String(str == null ? '' : str)
@@ -41,8 +41,8 @@ export function brandedEmail({ heading, intro, rows = [], cta, note, bodyHtml = 
 
   return `<!doctype html><html><body style="margin:0;background:#f3f4f6;padding:24px 0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
   <table cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e5e7eb">
-    <tr><td style="padding:20px 28px;border-bottom:1px solid #f0f0f0">
-      <span style="font-size:18px;font-weight:800;color:#111827;letter-spacing:-.3px">GR<span style="color:#2563eb">CRM</span></span>
+    <tr><td style="padding:20px 28px;border-bottom:1px solid #f0f0f0;background:#1e3a5f">
+      <span style="font-size:18px;font-weight:800;color:#ffffff;letter-spacing:-.3px">Our<span style="color:#7fb0ff">MTG</span></span>
     </td></tr>
     <tr><td style="padding:28px">
       ${heading ? `<h1 style="font-size:20px;font-weight:700;color:#111827;margin:0 0 12px">${esc(heading)}</h1>` : ''}
@@ -50,9 +50,10 @@ export function brandedEmail({ heading, intro, rows = [], cta, note, bodyHtml = 
     </td></tr>
     <tr><td style="padding:18px 28px;border-top:1px solid #f0f0f0;background:#fafafa">
       <p style="color:#9ca3af;font-size:12px;line-height:1.5;margin:0">
-        Sent by GR CRM · <a href="${APP_URL}" style="color:#6b7280">grcrm.com</a><br>
-        You're receiving this because you have a GR CRM account.
-        Manage notifications in <a href="${APP_URL}/settings" style="color:#6b7280">Settings</a>.
+        West Coast Capital Mortgage Inc. · NMLS #2817729 · Equal Housing Opportunity<br>
+        Your secure loan portal: <a href="${APP_URL}" style="color:#6b7280">${APP_URL.replace(/^https?:\/\//, '')}</a> ·
+        Office <a href="tel:310-654-1577" style="color:#6b7280">310-654-1577</a><br>
+        This is not a commitment to lend.
       </p>
     </td></tr>
   </table></body></html>`
