@@ -81,6 +81,9 @@ export const setCondition = (payload) =>
 export const sendMessage = (loanFileId, body) =>
   call('portal-message-send', { method: 'POST', body: { loanFileId, body } })
 
+export const setLoanFile = (payload) =>
+  call('portal-loanfile-set', { method: 'POST', body: payload })
+
 export const teamList = () => call('portal-team-set')
 export const teamAdd = (email, role) =>
   call('portal-team-set', { method: 'POST', body: { action: 'add', email, role } })

@@ -2,7 +2,7 @@
 // borrower dashboard, realtor portal, or LO dashboard. If more than one applies (rare),
 // a small switcher lets the user change view via ?as=. New users with no access yet get
 // a friendly "waiting on your invite" screen.
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useRole } from '../lib/useRole'
 import { Alert, Spinner } from '../components/ui'
 import BorrowerDashboard from './BorrowerDashboard'
@@ -25,7 +25,8 @@ export default function Portal() {
           <h1>You’re signed in 👋</h1>
           <p>Your loan portal isn’t linked to a file yet. Your loan officer will send you a secure
             invite link — open it from your email to see your status and upload documents.</p>
-          <p className="muted mb0">If you were expecting access, ask your loan officer to resend your invite.</p>
+          <p className="muted">If you were expecting access, ask your loan officer to resend your invite.</p>
+          <p className="mb0"><Link to="/portal/new-file">Are you the loan officer? Create your first loan file →</Link></p>
         </div>
       </div>
     )

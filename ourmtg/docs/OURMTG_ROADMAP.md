@@ -15,6 +15,7 @@ the same loan file, each seeing exactly what their role allows.
 | Two-way messaging | everyone on the file | `portal-message-send` + timeline UI; email notify to the other side, fail-soft |
 | Consent ledger actually written | compliance | `lead-submit` appends TCPA/email consent (exact text + IP + UA) to `portal_consent` |
 | PWA installability | borrowers | manifest + icon (add-to-home-screen) |
+| Standalone mode (no GRCRM) | this deployment | `portal-loanfile-set`: LO creates files manually and advances the stage by hand; the projector stays dormant until a GRCRM `app_state` appears in the same database |
 
 ## Next (rough order)
 

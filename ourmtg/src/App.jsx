@@ -11,6 +11,7 @@ import Legal from './pages/Legal'
 import Portal from './pages/Portal'
 import Documents from './pages/Documents'
 import LoanFileDetail from './pages/LoanFileDetail'
+import NewLoanFile from './pages/NewLoanFile'
 
 function NotFound() {
   return (
@@ -36,6 +37,7 @@ export default function App() {
             <Route path="portal" element={<RequireAuth><Portal /></RequireAuth>} />
             <Route path="portal/documents/:loanFileId" element={<RequireAuth><Documents /></RequireAuth>} />
             <Route path="portal/file/:loanFileId" element={<RequireAuth><LoanFileDetail /></RequireAuth>} />
+            <Route path="portal/new-file" element={<RequireAuth><NewLoanFile /></RequireAuth>} />
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>

@@ -6,8 +6,9 @@
 // All actions call owner-only gateway endpoints; the page reloads detail after each.
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { getFileDetail, reviewDoc, setPreapproval, createInvite, requestDoc, setCondition } from '../lib/api'
+import { getFileDetail, reviewDoc, setPreapproval, createInvite, requestDoc, setCondition, setLoanFile } from '../lib/api'
 import { money, shortDate, relTime } from '../lib/format'
+import { STAGE_STEPS, STAGE_LABEL } from '../lib/pipeline'
 import StatusTracker from '../components/StatusTracker'
 import MessageThread from '../components/MessageThread'
 import { Alert, Spinner, StatusChip, Empty } from '../components/ui'
@@ -182,7 +183,7 @@ export default function LoanFileDetail() {
 
       <div className="card">
         <StatusTracker stage={file.stage} />
-        {file.estCloseDate && <p className="muted center mb0" style={{ marginTop: 12 }}>Est. closing {shortDate(file.estCloseDate)}</p>}
+        <FileEditBar file={file} onSaved={load} />
       </div>
 
       <div className="card">
@@ -208,6 +209,58 @@ export default function LoanFileDetail() {
           placeholder="Message the borrower…" />
       </div>
     </>
+  )
+}
+
+// Inline file controls: advance the stage, set amount / est. close. Stage changes are
+// what move the borrower's tracker (standalone mode has no projector doing it).
+function FileEditBar({ file, onSaved }) {
+  const [stage, setStage] = useState(file.stage)
+  const [amount, setAmount] = useState(file.amount ?? '')
+  const [close, setClose] = useState(file.estCloseDate ?? '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const dirty = stage !== file.stage || String(amount) !== String(file.amount ?? '') || (close || '') !== (file.estCloseDate || '')
+
+  async function save() {
+    setBusy(true); setError('')
+    try {
+      await setLoanFile({
+        loanFileId: file.loanFileId,
+        stage,
+        amount: amount === '' ? null : amount,
+        estCloseDate: close || null,
+      })
+      await onSaved?.()
+    } catch (err) { setError(err?.message || 'Could not update the file.') }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <div style={{ marginTop: 14, borderTop: '1px solid var(--line)', paddingTop: 14 }}>
+      <Alert kind="error">{error}</Alert>
+      <div className="grid2">
+        <div className="field">
+          <label htmlFor="fs">Stage</label>
+          <select id="fs" value={stage} onChange={(e) => setStage(e.target.value)}>
+            {STAGE_STEPS.map((s) => <option key={s} value={s}>{STAGE_LABEL[s]}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="fa">Loan amount</label>
+          <input id="fa" type="number" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="—" />
+        </div>
+      </div>
+      <div className="spread">
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label htmlFor="fc">Est. close date</label>
+          <input id="fc" type="date" value={close || ''} onChange={(e) => setClose(e.target.value)} />
+        </div>
+        <button className="btn btn-navy btn-sm" disabled={busy || !dirty} onClick={save} type="button">
+          {busy ? 'Saving…' : 'Save changes'}
+        </button>
+      </div>
+    </div>
   )
 }
 

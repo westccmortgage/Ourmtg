@@ -2,7 +2,7 @@
 // snapshot, a stuck-files panel, and a table of every active file with missing-doc /
 // pending-review / open-condition counts and the single next action. Row → file detail.
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { teamList, teamAdd, teamRemove } from '../lib/api'
 import { money, shortDate, relTime } from '../lib/format'
 import { STAGE_LABEL, STAGE_STEPS } from '../lib/pipeline'
@@ -26,7 +26,10 @@ export default function LODashboard({ files }) {
 
   return (
     <>
-      <h1>Loan officer dashboard</h1>
+      <div className="spread">
+        <h1 className="mb0">Loan team dashboard</h1>
+        <Link to="/portal/new-file" className="btn btn-primary btn-sm">+ New loan file</Link>
+      </div>
 
       <div className="card">
         <div className="metrics">

@@ -48,6 +48,7 @@ netlify/functions/
   portal-condition-set.mjs    LO/processor creates/updates/clears UW conditions (internal)
   portal-message-send.mjs     Two-way borrower <-> loan-team messaging (+ email nudge)
   portal-team-set.mjs         LO manages processors/assistants (portal_team, owner-only)
+  portal-loanfile-set.mjs     Manual loan-file create/update (standalone mode, no GRCRM)
   _lib/                       Shared helpers (self-contained copies)
 docs/
   OURMTG_SPEC.md            Full product + technical spec (A–P)
