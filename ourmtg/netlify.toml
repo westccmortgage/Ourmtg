@@ -1,4 +1,15 @@
-# OurMTG — Netlify serverless functions.
+# OurMTG — Vite/React SPA front-end + Netlify serverless functions.
+# The SPA is built to `dist/`; the portal gateway functions live in `netlify/functions/`.
 # Scheduled functions (cron) self-register via each function's `export const config`.
 [build]
+  command = "npm run build"
+  publish = "dist"
   functions = "netlify/functions"
+
+# SPA fallback: client-side routing (react-router) serves index.html for any non-file,
+# non-function path. Netlify resolves /.netlify/functions/* and real assets BEFORE this
+# catch-all, so the API and static files are never shadowed.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
