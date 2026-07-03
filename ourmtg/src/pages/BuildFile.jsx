@@ -70,6 +70,7 @@ function payFactor(rate = 7, years = 30) {
   const r = rate / 100 / 12, n = years * 12
   return r / (1 - Math.pow(1 + r, -n))
 }
+const BASE_RATE = 7 // today's typical 30-yr par used as the anchor; shown, never hidden
 const DOWN_PCT = { none: 0.035, 3: 0.04, 10: 0.075, 20: 0.15, '20p': 0.25 }
 const TARGET_VAL = { 500: 500000, 750: 750000, 1000: 1000000, 1500: 1500000, 2000: 2000000, 3000: 3000000 }
 const TI_MONTHLY = 0.016 / 12 // rough CA taxes + insurance, per month, on price
@@ -169,6 +170,8 @@ export default function BuildFile() {
   const [activated, setActivated] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  // plan-card rate explorer (the payment is honest about its rate — and adjustable)
+  const [rateSel, setRateSel] = useState(BASE_RATE)
   // rate alarm
   const [alarmRate, setAlarmRate] = useState(6.25)
   const [alarmEmail, setAlarmEmail] = useState('')
@@ -197,7 +200,12 @@ export default function BuildFile() {
         if (v == null || v === '') continue
         lines.push(`${q.key}: ${OPT_LABEL[`${q.key}:${v}`] || v}`)
       }
-      if (file?.target) lines.push(`TARGET PRICE: ${money(file.target)} · down ~${money(file.downAmt)} (${Math.round((file.downPct || 0) * 100)}%) · est monthly ~${money(file.monthly)}`)
+      if (file?.target) {
+        const loan = file.target - file.downAmt
+        const mAt = loan * payFactor(rateSel) + file.target * TI_MONTHLY
+        lines.push(`TARGET PRICE: ${money(file.target)} · down ~${money(file.downAmt)} (${Math.round((file.downPct || 0) * 100)}%) · est monthly ~${money(mAt)} at ${rateSel.toFixed(3)}%`)
+        if (rateSel < BASE_RATE) lines.push(`Explored a buydown to ${rateSel.toFixed(3)}% (~${(((BASE_RATE - rateSel) / 0.25)).toFixed(1)} pts) — price it for real`)
+      }
       lines.push(`Programs: ${file.programs.map(([p]) => p).join('; ')}`)
       lines.push(`Route: ~${file.months} months to keys`)
       await submitLead({
@@ -296,26 +304,47 @@ export default function BuildFile() {
         ))}
       </div>
 
-      {file.buying && file.target && file.monthly && (
-        <div className="card">
-          <div className="card-head">
-            <h2>Your {money(file.target)}{answers.target === '3000' ? '+' : ''} plan</h2>
-            <span className="chip">your numbers</span>
+      {file.buying && file.target && file.monthly && (() => {
+        const loan = file.target - file.downAmt
+        const monthlyAt = loan * payFactor(rateSel) + file.target * TI_MONTHLY
+        const pts = rateSel < BASE_RATE ? (BASE_RATE - rateSel) / 0.25 : 0
+        const ptsCost = loan * 0.01 * pts
+        const closeLow = file.target * 0.02, closeHigh = file.target * 0.03
+        return (
+          <div className="card">
+            <div className="card-head">
+              <h2>Your {money(file.target)}{answers.target === '3000' ? '+' : ''} plan</h2>
+              <span className="chip">your numbers</span>
+            </div>
+            <p className="muted mt0" style={{ fontSize: 13.5 }}>Your target, your down payment — here’s the only number that matters:</p>
+            <div className="big-num" style={{ fontSize: 40 }}>{money(monthlyAt)}<span style={{ fontSize: 18, color: 'var(--muted)' }}> / month</span></div>
+
+            <div className="field" style={{ margin: '16px 0 4px' }}>
+              <label htmlFor="pl-rate">At rate: <strong>{rateSel.toFixed(3)}%</strong> — slide to see it move</label>
+              <input id="pl-rate" type="range" min="5.875" max="7.625" step="0.125" value={rateSel}
+                onChange={(e) => setRateSel(Number(e.target.value))} />
+              <p className="hint" style={{ marginTop: 2 }}>
+                {pts > 0
+                  ? <>Getting {rateSel.toFixed(3)}% ≈ <strong>{money(ptsCost)}</strong> in points ({pts.toFixed(1)} pt), paid at closing — saves <strong>{money(loan * (payFactor(BASE_RATE) - payFactor(rateSel)))}</strong>/mo.</>
+                  : <>That’s today’s typical par rate — no points needed.</>}
+                {' '}Your personal rate depends on credit, program and the day — activation gets you the real quote.
+              </p>
+            </div>
+
+            <div className="metrics" style={{ marginTop: 12 }}>
+              <div className="metric"><span className="lbl">Down payment ({Math.round(file.downPct * 100)}%)</span><span className="big-num" style={{ fontSize: 22 }}>{money(file.downAmt)}</span></div>
+              <div className="metric"><span className="lbl">Loan</span><span className="big-num" style={{ fontSize: 22 }}>{money(loan)}</span></div>
+              <div className="metric"><span className="lbl">Est. closing costs</span><span className="big-num" style={{ fontSize: 22 }}>{money(closeLow)}–{money(closeHigh)}</span></div>
+              <div className="metric"><span className="lbl">Cash to close</span><span className="big-num" style={{ fontSize: 22, color: 'var(--st-processing)' }}>{money(file.downAmt + closeLow + ptsCost)}–{money(file.downAmt + closeHigh + ptsCost)}</span></div>
+            </div>
+            <p className="hint" style={{ marginTop: 12 }}>
+              Monthly includes rough CA taxes &amp; insurance. Closing costs estimated at 2–3% (lender, title, escrow, prepaids{pts > 0 ? ', your points included in cash-to-close' : ''}).
+              <strong> If this monthly feels right, the price is right</strong> — that’s the whole test.
+              Estimates only, not an offer or approval.
+            </p>
           </div>
-          <p className="muted mt0" style={{ fontSize: 13.5 }}>Your target, your down payment — here’s the only number that matters:</p>
-          <div className="big-num" style={{ fontSize: 40 }}>{money(file.monthly)}<span style={{ fontSize: 18, color: 'var(--muted)' }}> / month</span></div>
-          <div className="metrics" style={{ marginTop: 14 }}>
-            <div className="metric"><span className="lbl">Down payment</span><span className="big-num" style={{ fontSize: 22 }}>{money(file.downAmt)}</span></div>
-            <div className="metric"><span className="lbl">Loan</span><span className="big-num" style={{ fontSize: 22 }}>{money(file.target - file.downAmt)}</span></div>
-            <div className="metric"><span className="lbl">Down %</span><span className="big-num" style={{ fontSize: 22 }}>{Math.round(file.downPct * 100)}%</span></div>
-          </div>
-          <p className="hint" style={{ marginTop: 12 }}>
-            Includes rough CA taxes &amp; insurance at today’s typical rates.
-            <strong> If this monthly feels right, the price is right</strong> — that’s the whole test.
-            Structure (points, buydowns, program) can move it — that’s our part. Estimate only, not an offer or approval.
-          </p>
-        </div>
-      )}
+        )
+      })()}
 
       <div className="card">
         <div className="card-head"><h2>Programs matched to you</h2></div>
