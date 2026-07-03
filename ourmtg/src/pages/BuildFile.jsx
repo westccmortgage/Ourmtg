@@ -36,6 +36,14 @@ const QUESTIONS = [
     ['ret', 'Retired / other'],
   ]},
   { key: 'housing', type: 'money', q: 'What do you pay for housing now, monthly?', chips: [1800, 2500, 3200, 4000, 5000] },
+  { key: 'target', q: 'What price are you aiming for?', opts: [
+    ['500', 'Under $500K'],
+    ['750', '$500K – $750K'],
+    ['1000', '$750K – $1M'],
+    ['1500', '$1M – $1.5M'],
+    ['1500p', '$1.5M or more'],
+    ['none', 'No target yet — show me what works'],
+  ]},
   { key: 'down', q: 'Down payment saved so far?', opts: [
     ['none', 'Almost nothing — I need help with this'],
     ['3', 'Around 3–5%'],
@@ -61,18 +69,26 @@ function payFactor(rate = 7, years = 30) {
   return r / (1 - Math.pow(1 + r, -n))
 }
 const DOWN_PCT = { none: 0.03, 3: 0.04, 10: 0.075, 20: 0.15, '20p': 0.25 }
+const TARGET_VAL = { 500: 500000, 750: 750000, 1000: 1000000, 1500: 1500000, '1500p': 1750000 }
 
 function buildFile(a) {
   const buying = ['first', 'next', 'invest'].includes(a.goal)
   const rent = Number(a.housing) || 0
+  const target = TARGET_VAL[a.target] || null
 
-  // Price range: assume a similar monthly outlay; ~82% of it is principal+interest.
+  // What the CURRENT payment already covers (~82% of it as principal+interest).
+  // Presented as a floor, never a ceiling: the target drives the conversation.
   let range = null
   if (buying && rent > 0) {
     const loan = (rent * 0.82) / payFactor(7)
     const price = loan / (1 - (DOWN_PCT[a.down] ?? 0.05))
     range = [price * 0.9, price * 1.08]
   }
+  // The gap plan: aiming above what today's payment covers is a SALES moment,
+  // not a rejection — bridging it is literally the LO's job.
+  const gap = !!(buying && target && range && target > range[1] * 1.02)
+  // Draft letter prints the AMBITION (their target), never the floor.
+  const letterMax = buying ? (Math.max(target || 0, range ? range[1] : 0) || null) : null
 
   // Months to keys.
   const base = { asap: 2, '3mo': 3, '6mo': 6, '12mo': 10, look: 12 }[a.when] ?? 6
@@ -93,7 +109,7 @@ function buildFile(a) {
   }
   if (a.goal === 'refi') programs.push(['Rate-term refinance', 'We price your exact payoff and tell you honestly if it pays.'])
   if (a.goal === 'cash') programs.push(['Cash-out / HELOC', 'Equity into cash — priced both ways so you pick the cheaper one.'])
-  if (range && range[1] > 1100000) programs.push(['Jumbo track', 'Above county limits — we pre-package reserves and ratios early.'])
+  if ((letterMax || 0) > 1100000) programs.push(['Jumbo track', 'Above county limits — we pre-package reserves and ratios early.'])
   if (programs.length === 0) programs.push(['Conventional — best pricing', 'Strong profile: your job is choosing the house, not the loan.'])
 
   // The route (a real sequence — numbering carries meaning).
@@ -111,7 +127,7 @@ function buildFile(a) {
         ['Close in ~3 weeks', 'Tracked live in this portal, stage by stage.'],
       ]
 
-  return { buying, rent, range, months, programs: programs.slice(0, 3), steps }
+  return { buying, rent, range, target, gap, letterMax, months, programs: programs.slice(0, 3), steps }
 }
 
 // ── live rent clock ───────────────────────────────────────────────────────────
@@ -179,7 +195,8 @@ export default function BuildFile() {
         if (v == null || v === '') continue
         lines.push(`${q.key}: ${OPT_LABEL[`${q.key}:${v}`] || v}`)
       }
-      if (file?.range) lines.push(`Estimated range: ${money(file.range[0])}–${money(file.range[1])}`)
+      if (file?.range) lines.push(`Current payment covers: ${money(file.range[0])}–${money(file.range[1])}`)
+      if (file?.target) lines.push(`TARGET PRICE: ${money(file.target)}${file.gap ? ` — GAP ${money(file.target - file.range[1])}, wants the bridge plan` : ''}`)
       lines.push(`Programs: ${file.programs.map(([p]) => p).join('; ')}`)
       lines.push(`Route: ~${file.months} months to keys`)
       await submitLead({
@@ -277,9 +294,31 @@ export default function BuildFile() {
 
       {file.range && (
         <div className="card">
-          <div className="card-head"><h2>Your estimated range</h2></div>
+          <div className="card-head"><h2>What your current payment already buys</h2></div>
           <div className="big-num" style={{ fontSize: 38 }}>{money(file.range[0])} – {money(file.range[1])}</div>
-          <p className="hint" style={{ marginTop: 10 }}>Built from your current housing payment at today’s typical rates. Estimate only — not an offer or approval.</p>
+          <p className="hint" style={{ marginTop: 10 }}>
+            A starting point, <strong>not a ceiling</strong> — a bigger down payment, a co-borrower,
+            or income counted properly (bonus, RSU, business add-backs) all raise it.
+            Estimate only — not an offer or approval.
+          </p>
+        </div>
+      )}
+
+      {file.gap && (
+        <div className="card" style={{ borderColor: 'var(--st-underwriting)', borderWidth: 1.5 }}>
+          <div className="card-head">
+            <h2>Your target vs. today</h2>
+            <span className="chip amber">bridge: {money(file.target - file.range[1])}</span>
+          </div>
+          <div className="metrics" style={{ marginBottom: 14 }}>
+            <div className="metric"><span className="lbl">You’re aiming for</span><span className="big-num" style={{ fontSize: 26 }}>{money(file.target)}{answers.target === '1500p' ? '+' : ''}</span></div>
+            <div className="metric"><span className="lbl">Today’s payment covers</span><span className="big-num" style={{ fontSize: 26 }}>~{money(file.range[1])}</span></div>
+          </div>
+          <div className="row"><div className="grow"><div className="rlabel">Bigger or smarter down payment</div><div className="rsub">Every extra 5% down moves the number six figures at your level — including gift funds and equity from a sale.</div></div></div>
+          <div className="row"><div className="grow"><div className="rlabel">Income counted fully</div><div className="rsub">Bonus, RSU, overtime, business add-backs — calculators miss them; underwriters (and we) don’t. This alone often doubles what a website shows.</div></div></div>
+          <div className="row"><div className="grow"><div className="rlabel">A co-borrower</div><div className="rsub">A second income on the file raises the range immediately.</div></div></div>
+          <div className="row"><div className="grow"><div className="rlabel">The right program &amp; structure</div><div className="rsub">Jumbo, buydowns, asset-based qualifying — structure is exactly the game we play daily.</div></div></div>
+          <p className="hint" style={{ marginTop: 12 }}>Closing this gap is literally our job — and it’s what activating this file starts. Buyers at your target level are our favorite files.</p>
         </div>
       )}
 
@@ -313,7 +352,7 @@ export default function BuildFile() {
           <p style={{ margin: '10px 0 4px' }}><strong>Prepared for:</strong> {name || '____________'}</p>
           <p style={{ margin: 0 }}>
             West Coast Capital Mortgage Inc. is prepared to consider a loan request
-            {file.range ? <> of up to <strong>{money(file.range[1])}</strong></> : null},
+            {file.letterMax ? <> toward a purchase of up to <strong>{money(file.letterMax)}</strong></> : null},
             subject to full underwriting, verification, and program guidelines.
           </p>
           <p className="fileno" style={{ marginTop: 14 }}>NMLS #2817729 · draft for illustration only — not a loan approval or commitment to lend</p>
