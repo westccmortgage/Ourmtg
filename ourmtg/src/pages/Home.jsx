@@ -16,11 +16,11 @@ export default function Home() {
           “just checking in” call.
         </p>
         <div className="cta-grid">
-          <Link to="/apply" className="btn btn-primary btn-lg">Start your application</Link>
+          <Link to="/plan" className="btn btn-primary btn-lg">Build my file — 60 sec</Link>
           <Link to="/realtor" className="btn btn-ghost btn-lg">I’m a Realtor</Link>
         </div>
         <p style={{ marginTop: 18 }}>
-          <small>Already have a portal? <Link to="/login">Sign in</Link>.</small>
+          <small>No questions, just the form? <Link to="/apply">Start an application</Link>. Already have a portal? <Link to="/login">Sign in</Link>.</small>
         </p>
         <div className="wire" aria-hidden="true" />
       </section>
@@ -58,6 +58,7 @@ export default function Home() {
         <div className="row"><div className="grow"><Link to="/jumbo" className="rlabel" style={{ textDecoration: 'none' }}>Jumbo →</Link><div className="rsub">Above county limits, done calmly.</div></div></div>
         <div className="row"><div className="grow"><Link to="/refi" className="rlabel" style={{ textDecoration: 'none' }}>Refinance →</Link><div className="rsub">An honest answer on whether it pays.</div></div></div>
         <div className="row"><div className="grow"><Link to="/calculator" className="rlabel" style={{ textDecoration: 'none' }}>Calculators →</Link><div className="rsub">Affordability and refi savings, no email required.</div></div></div>
+        <div className="row"><div className="grow"><Link to="/who" className="rlabel" style={{ textDecoration: 'none' }}>Who sends what? →</Link><div className="rsub">Realtor forms vs. lender forms vs. inspector forms — decoded.</div></div></div>
       </div>
     </>
   )

@@ -7,6 +7,8 @@ import Login from './pages/Login'
 import Apply from './pages/Apply'
 import LeadFlow from './pages/LeadFlow'
 import Calculator from './pages/Calculator'
+import BuildFile from './pages/BuildFile'
+import WhoDoesWhat from './pages/WhoDoesWhat'
 import { FLOWS } from './lib/leadFlows'
 import RealtorLanding from './pages/RealtorLanding'
 import Invite from './pages/Invite'
@@ -36,6 +38,8 @@ export default function App() {
             <Route path="apply" element={<Apply />} />
             <Route path="realtor" element={<RealtorLanding />} />
             <Route path="calculator" element={<Calculator />} />
+            <Route path="plan" element={<BuildFile />} />
+            <Route path="who" element={<WhoDoesWhat />} />
             {Object.values(FLOWS).map((flow) => (
               <Route key={flow.path} path={flow.path.slice(1)} element={<LeadFlow flow={flow} />} />
             ))}

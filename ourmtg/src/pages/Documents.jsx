@@ -36,6 +36,7 @@ function DocItem({ loanFileId, item, onDone }) {
     <div className="row">
       <div className="grow">
         <div className="rlabel">{item.label}</div>
+        {item.why && <div className="rsub" style={{ marginTop: 2 }}>Why: {item.why}</div>}
         <div className="rsub">
           <StatusChip status={item.status} />
           {item.uploadedAt && item.status !== 'rejected' && <span className="muted"> · {shortDate(item.uploadedAt)}</span>}
@@ -89,6 +90,10 @@ export default function Documents() {
         <span className="chip">{data.uploaded} of {data.total} done</span>
       </div>
       <p className="muted">Snap a photo or upload a file — no scanner needed. Everything is encrypted and private to your loan team.</p>
+      <p className="fileno" style={{ marginBottom: 14 }}>
+        Everything on this page is asked by your loan team (us). Inspection reports and
+        disclosure packets come from your realtor — <Link to="/who">see who sends what</Link>.
+      </p>
 
       <div className="card">
         <div className="card-head"><h2>Your items</h2></div>

@@ -67,6 +67,7 @@ export default async (req) => {
       docKey: it.doc_key,
       label: it.label,
       who: it.who,
+      why: it.why || null,
       status,
       uploadedAt: row?.uploaded_at || null,
       rejectReason: row?.status === 'rejected' ? (row?.reject_reason || null) : null,

@@ -242,3 +242,26 @@ table.q tr:hover td { background: #f0ede4; cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   .wire::after, .ticker .in, .stamp, .spinner::after { animation: none !important; }
 }
+
+/* ── File builder (/plan) ─────────────────────────────────────────────────── */
+.qboxes { display: flex; gap: 5px; margin: 4px 0 0; }
+.qb { width: 15px; height: 15px; border: 1.5px solid var(--ink); border-radius: 2px; background: transparent; }
+.qb.on { background: var(--ink); }
+.opt {
+  display: block; width: 100%; text-align: left; background: var(--panel);
+  border: 1.5px solid var(--ink); border-radius: var(--radius); padding: 15px 16px;
+  font-family: var(--sans); font-size: 15px; font-weight: 600; letter-spacing: -.01em;
+  color: var(--ink); cursor: pointer; margin-bottom: 10px; transition: background .1s, color .1s;
+}
+.opt:hover { background: var(--ink); color: var(--paper); }
+.stamp.ok { color: var(--green); border-color: var(--green); }
+
+/* Draft letter preview */
+.letter { position: relative; background: #fff; border: 1px solid var(--ink); border-radius: var(--radius); padding: 22px; margin-bottom: 16px; overflow: hidden; }
+.letter p { font-size: 14px; color: var(--ink); }
+.letter-stamp {
+  position: absolute; right: 12px; top: 38px; transform: rotate(-14deg);
+  font-family: var(--disp); font-size: 36px; letter-spacing: .18em; text-transform: uppercase;
+  color: transparent; -webkit-text-stroke: 1.5px var(--stamp); opacity: .45; pointer-events: none;
+}
+input[type=range] { accent-color: var(--ink); padding: 0; border: 0; background: transparent; }
