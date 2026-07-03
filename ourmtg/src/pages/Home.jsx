@@ -48,6 +48,17 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      <div className="card">
+        <div className="card-head"><h2>Find your path</h2></div>
+        <div className="row"><div className="grow"><Link to="/dpa" className="rlabel" style={{ textDecoration: 'none' }}>Down payment assistance →</Link><div className="rsub">Check what California will help you with.</div></div></div>
+        <div className="row"><div className="grow"><Link to="/fha" className="rlabel" style={{ textDecoration: 'none' }}>FHA — first home →</Link><div className="rsub">3.5% down, friendlier credit.</div></div></div>
+        <div className="row"><div className="grow"><Link to="/va" className="rlabel" style={{ textDecoration: 'none' }}>VA — you served →</Link><div className="rsub">$0 down, no monthly mortgage insurance.</div></div></div>
+        <div className="row"><div className="grow"><Link to="/self-employed" className="rlabel" style={{ textDecoration: 'none' }}>Self-employed →</Link><div className="rsub">Qualify on bank statements, not tax returns.</div></div></div>
+        <div className="row"><div className="grow"><Link to="/jumbo" className="rlabel" style={{ textDecoration: 'none' }}>Jumbo →</Link><div className="rsub">Above county limits, done calmly.</div></div></div>
+        <div className="row"><div className="grow"><Link to="/refi" className="rlabel" style={{ textDecoration: 'none' }}>Refinance →</Link><div className="rsub">An honest answer on whether it pays.</div></div></div>
+        <div className="row"><div className="grow"><Link to="/calculator" className="rlabel" style={{ textDecoration: 'none' }}>Calculators →</Link><div className="rsub">Affordability and refi savings, no email required.</div></div></div>
+      </div>
     </>
   )
 }

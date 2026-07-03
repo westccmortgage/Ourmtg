@@ -5,6 +5,9 @@ import RequireAuth from './components/RequireAuth'
 import Home from './pages/Home'
 import Login from './pages/Login'
 import Apply from './pages/Apply'
+import LeadFlow from './pages/LeadFlow'
+import Calculator from './pages/Calculator'
+import { FLOWS } from './lib/leadFlows'
 import RealtorLanding from './pages/RealtorLanding'
 import Invite from './pages/Invite'
 import Legal from './pages/Legal'
@@ -32,6 +35,10 @@ export default function App() {
             <Route path="login" element={<Login />} />
             <Route path="apply" element={<Apply />} />
             <Route path="realtor" element={<RealtorLanding />} />
+            <Route path="calculator" element={<Calculator />} />
+            {Object.values(FLOWS).map((flow) => (
+              <Route key={flow.path} path={flow.path.slice(1)} element={<LeadFlow flow={flow} />} />
+            ))}
             <Route path="invite" element={<Invite />} />
             <Route path="legal/:doc" element={<Legal />} />
             <Route path="portal" element={<RequireAuth><Portal /></RequireAuth>} />
