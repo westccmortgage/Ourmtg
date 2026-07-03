@@ -35,16 +35,16 @@ const QUESTIONS = [
     ['mil', 'Military / veteran'],
     ['ret', 'Retired / other'],
   ]},
-  { key: 'housing', type: 'money', q: 'What do you pay for housing now, monthly?', chips: [1800, 2500, 3200, 4000, 5000] },
   { key: 'target', q: 'What price are you aiming for?', opts: [
     ['500', 'Under $500K'],
     ['750', '$500K – $750K'],
     ['1000', '$750K – $1M'],
     ['1500', '$1M – $1.5M'],
-    ['1500p', '$1.5M or more'],
+    ['2000', '$1.5M – $2M'],
+    ['3000', '$2M and up'],
     ['none', 'No target yet — show me what works'],
   ]},
-  { key: 'down', q: 'Down payment saved so far?', opts: [
+  { key: 'down', q: 'Down payment you plan to bring?', opts: [
     ['none', 'Almost nothing — I need help with this'],
     ['3', 'Around 3–5%'],
     ['10', '5–10%'],
@@ -58,6 +58,8 @@ const QUESTIONS = [
     ['d', 'Rebuilding'],
     ['u', 'Honestly, no idea'],
   ]},
+  // Last and OPTIONAL — rent feeds ONLY the motivational clock, never capacity.
+  { key: 'housing', type: 'money', q: 'Renting right now? Your monthly rent (optional)', chips: [1800, 2500, 3200, 4000, 5000], skip: true },
 ]
 
 const OPT_LABEL = {}
@@ -68,27 +70,27 @@ function payFactor(rate = 7, years = 30) {
   const r = rate / 100 / 12, n = years * 12
   return r / (1 - Math.pow(1 + r, -n))
 }
-const DOWN_PCT = { none: 0.03, 3: 0.04, 10: 0.075, 20: 0.15, '20p': 0.25 }
-const TARGET_VAL = { 500: 500000, 750: 750000, 1000: 1000000, 1500: 1500000, '1500p': 1750000 }
+const DOWN_PCT = { none: 0.035, 3: 0.04, 10: 0.075, 20: 0.15, '20p': 0.25 }
+const TARGET_VAL = { 500: 500000, 750: 750000, 1000: 1000000, 1500: 1500000, 2000: 2000000, 3000: 3000000 }
+const TI_MONTHLY = 0.016 / 12 // rough CA taxes + insurance, per month, on price
 
 function buildFile(a) {
   const buying = ['first', 'next', 'invest'].includes(a.goal)
   const rent = Number(a.housing) || 0
   const target = TARGET_VAL[a.target] || null
 
-  // What the CURRENT payment already covers (~82% of it as principal+interest).
-  // Presented as a floor, never a ceiling: the target drives the conversation.
-  let range = null
-  if (buying && rent > 0) {
-    const loan = (rent * 0.82) / payFactor(7)
-    const price = loan / (1 - (DOWN_PCT[a.down] ?? 0.05))
-    range = [price * 0.9, price * 1.08]
+  // The buyer's own math, nothing else: THEIR target + THEIR down payment → the
+  // monthly. Current rent is deliberately NOT a capacity signal (people save, move
+  // cities, live small while aiming big) — it feeds only the motivational clock.
+  let monthly = null, downAmt = null, downPct = null
+  if (buying && target) {
+    downPct = DOWN_PCT[a.down] ?? 0.05
+    downAmt = target * downPct
+    const loan = target - downAmt
+    monthly = loan * payFactor(7) + target * TI_MONTHLY
   }
-  // The gap plan: aiming above what today's payment covers is a SALES moment,
-  // not a rejection — bridging it is literally the LO's job.
-  const gap = !!(buying && target && range && target > range[1] * 1.02)
-  // Draft letter prints the AMBITION (their target), never the floor.
-  const letterMax = buying ? (Math.max(target || 0, range ? range[1] : 0) || null) : null
+  // Draft letter prints the AMBITION — their target.
+  const letterMax = buying ? target : null
 
   // Months to keys.
   const base = { asap: 2, '3mo': 3, '6mo': 6, '12mo': 10, look: 12 }[a.when] ?? 6
@@ -127,7 +129,7 @@ function buildFile(a) {
         ['Close in ~3 weeks', 'Tracked live in this portal, stage by stage.'],
       ]
 
-  return { buying, rent, range, target, gap, letterMax, months, programs: programs.slice(0, 3), steps }
+  return { buying, rent, target, monthly, downAmt, downPct, letterMax, months, programs: programs.slice(0, 3), steps }
 }
 
 // ── live rent clock ───────────────────────────────────────────────────────────
@@ -151,7 +153,7 @@ function RentClock({ rent }) {
         <div className="metric"><span className="lbl">This year</span><span className="big-num" style={{ fontSize: 22 }}>{money(rent * 12)}</span></div>
         <div className="metric"><span className="lbl">Of it into YOUR equity</span><span className="big-num" style={{ fontSize: 22 }}>$0.00</span></div>
       </div>
-      <p className="hint" style={{ marginTop: 12 }}>A similar monthly payment could be buying a home in your range instead.</p>
+      <p className="hint" style={{ marginTop: 12 }}>Every one of those dollars built your landlord’s equity. In your own home, part of every payment comes back to YOU.</p>
     </div>
   )
 }
@@ -195,8 +197,7 @@ export default function BuildFile() {
         if (v == null || v === '') continue
         lines.push(`${q.key}: ${OPT_LABEL[`${q.key}:${v}`] || v}`)
       }
-      if (file?.range) lines.push(`Current payment covers: ${money(file.range[0])}–${money(file.range[1])}`)
-      if (file?.target) lines.push(`TARGET PRICE: ${money(file.target)}${file.gap ? ` — GAP ${money(file.target - file.range[1])}, wants the bridge plan` : ''}`)
+      if (file?.target) lines.push(`TARGET PRICE: ${money(file.target)} · down ~${money(file.downAmt)} (${Math.round((file.downPct || 0) * 100)}%) · est monthly ~${money(file.monthly)}`)
       lines.push(`Programs: ${file.programs.map(([p]) => p).join('; ')}`)
       lines.push(`Route: ~${file.months} months to keys`)
       await submitLead({
@@ -264,7 +265,10 @@ export default function BuildFile() {
               ))}
             </div>
             <div className="field"><input value={textVal} onChange={(e) => setTextVal(e.target.value)} placeholder="$2,800" inputMode="numeric" /></div>
-            <button className="btn btn-primary" disabled={!textVal.trim()}>Continue</button>
+            <div className="pill-row">
+              <button className="btn btn-primary" disabled={!textVal.trim()}>Continue</button>
+              {q.skip && <button type="button" className="btn btn-ghost" onClick={() => answer(q.key, '')}>I own / skip</button>}
+            </div>
           </form>
         )}
       </div>
@@ -292,33 +296,24 @@ export default function BuildFile() {
         ))}
       </div>
 
-      {file.range && (
+      {file.buying && file.target && file.monthly && (
         <div className="card">
-          <div className="card-head"><h2>What your current payment already buys</h2></div>
-          <div className="big-num" style={{ fontSize: 38 }}>{money(file.range[0])} – {money(file.range[1])}</div>
-          <p className="hint" style={{ marginTop: 10 }}>
-            A starting point, <strong>not a ceiling</strong> — a bigger down payment, a co-borrower,
-            or income counted properly (bonus, RSU, business add-backs) all raise it.
-            Estimate only — not an offer or approval.
-          </p>
-        </div>
-      )}
-
-      {file.gap && (
-        <div className="card" style={{ borderColor: 'var(--st-underwriting)', borderWidth: 1.5 }}>
           <div className="card-head">
-            <h2>Your target vs. today</h2>
-            <span className="chip amber">bridge: {money(file.target - file.range[1])}</span>
+            <h2>Your {money(file.target)}{answers.target === '3000' ? '+' : ''} plan</h2>
+            <span className="chip">your numbers</span>
           </div>
-          <div className="metrics" style={{ marginBottom: 14 }}>
-            <div className="metric"><span className="lbl">You’re aiming for</span><span className="big-num" style={{ fontSize: 26 }}>{money(file.target)}{answers.target === '1500p' ? '+' : ''}</span></div>
-            <div className="metric"><span className="lbl">Today’s payment covers</span><span className="big-num" style={{ fontSize: 26 }}>~{money(file.range[1])}</span></div>
+          <p className="muted mt0" style={{ fontSize: 13.5 }}>Your target, your down payment — here’s the only number that matters:</p>
+          <div className="big-num" style={{ fontSize: 40 }}>{money(file.monthly)}<span style={{ fontSize: 18, color: 'var(--muted)' }}> / month</span></div>
+          <div className="metrics" style={{ marginTop: 14 }}>
+            <div className="metric"><span className="lbl">Down payment</span><span className="big-num" style={{ fontSize: 22 }}>{money(file.downAmt)}</span></div>
+            <div className="metric"><span className="lbl">Loan</span><span className="big-num" style={{ fontSize: 22 }}>{money(file.target - file.downAmt)}</span></div>
+            <div className="metric"><span className="lbl">Down %</span><span className="big-num" style={{ fontSize: 22 }}>{Math.round(file.downPct * 100)}%</span></div>
           </div>
-          <div className="row"><div className="grow"><div className="rlabel">Bigger or smarter down payment</div><div className="rsub">Every extra 5% down moves the number six figures at your level — including gift funds and equity from a sale.</div></div></div>
-          <div className="row"><div className="grow"><div className="rlabel">Income counted fully</div><div className="rsub">Bonus, RSU, overtime, business add-backs — calculators miss them; underwriters (and we) don’t. This alone often doubles what a website shows.</div></div></div>
-          <div className="row"><div className="grow"><div className="rlabel">A co-borrower</div><div className="rsub">A second income on the file raises the range immediately.</div></div></div>
-          <div className="row"><div className="grow"><div className="rlabel">The right program &amp; structure</div><div className="rsub">Jumbo, buydowns, asset-based qualifying — structure is exactly the game we play daily.</div></div></div>
-          <p className="hint" style={{ marginTop: 12 }}>Closing this gap is literally our job — and it’s what activating this file starts. Buyers at your target level are our favorite files.</p>
+          <p className="hint" style={{ marginTop: 12 }}>
+            Includes rough CA taxes &amp; insurance at today’s typical rates.
+            <strong> If this monthly feels right, the price is right</strong> — that’s the whole test.
+            Structure (points, buydowns, program) can move it — that’s our part. Estimate only, not an offer or approval.
+          </p>
         </div>
       )}
 
