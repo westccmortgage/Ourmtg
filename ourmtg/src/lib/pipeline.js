@@ -25,6 +25,19 @@ export const MILESTONE_LABEL = {
   funded: 'Funded',
 }
 
+// Each stage owns one of the product's only colors (merged-concept rule: the UI is
+// monochrome; color belongs to the stage and the stamp). Values are CSS vars from
+// styles.css so themes stay centralized.
+export const STAGE_COLOR = {
+  lead: 'var(--st-lead)',
+  preapproval: 'var(--st-preapproval)',
+  processing: 'var(--st-processing)',
+  underwriting: 'var(--st-underwriting)',
+  conditional: 'var(--st-conditional)',
+  ctc: 'var(--st-ctc)',
+  funded: 'var(--st-funded)',
+}
+
 export function stepIndex(stage) {
   const i = STAGE_STEPS.indexOf(stage)
   return i < 0 ? 0 : i

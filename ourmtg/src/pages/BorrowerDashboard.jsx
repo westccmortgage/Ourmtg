@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { getStatus, getChecklist, listConditions, listMessages } from '../lib/api'
 import { BRAND } from '../lib/config'
+import { STAGE_COLOR } from '../lib/pipeline'
 import { money, shortDate } from '../lib/format'
 import StatusTracker from '../components/StatusTracker'
 import MessageThread from '../components/MessageThread'
@@ -55,23 +56,41 @@ export default function BorrowerDashboard({ grants }) {
         )}
       </div>
 
-      <div className="card">
-        <div className="card-head">
+      <div className="card" style={{ overflow: 'hidden' }}>
+        <span className="stagenum" style={{ '--stage': STAGE_COLOR[status.stage] }} aria-hidden="true">
+          {(status.step ?? 0) + 1}
+        </span>
+        <p className="fileno">File № {String(active).slice(0, 8).toUpperCase()}</p>
+        <div className="card-head" style={{ paddingRight: 70 }}>
           <h2>Your loan status</h2>
-          <span className="chip">{status.stageLabel}</span>
+          <span className="stamp ink" style={{ '--stage': STAGE_COLOR[status.stage] }}>{status.stageLabel}</span>
         </div>
         <StatusTracker steps={status.steps} stage={status.stage} />
-        <div className="callout" style={{ marginTop: 16 }}>
+        <div className="callout" style={{ marginTop: 18 }}>
           <div className="k">What’s next</div>
           <p>{status.whatsNext}</p>
         </div>
-        <div className="metrics" style={{ marginTop: 16 }}>
+        <div className="metrics" style={{ marginTop: 18 }}>
           {status.loanType && <div className="metric"><span className="lbl">Loan type</span><span>{status.loanType}</span></div>}
           {status.purpose && <div className="metric"><span className="lbl">Purpose</span><span>{status.purpose}</span></div>}
           {status.amount != null && <div className="metric"><span className="lbl">Loan amount</span><span>{money(status.amount)}</span></div>}
           {status.estCloseDate && <div className="metric"><span className="lbl">Est. closing</span><span>{shortDate(status.estCloseDate)}</span></div>}
         </div>
       </div>
+
+      {messages && messages.length > 0 && (
+        <div className="ticker" style={{ margin: '0 0 16px' }} aria-hidden="true">
+          <span className="in">
+            {[0, 1].map((rep) => (
+              <span key={rep}>
+                {messages.slice(0, 6).map((m) => (
+                  <span key={`${rep}-${m.id}`}>&nbsp;<b>{shortDate(m.created_at)}</b> {m.body} ·</span>
+                ))}
+              </span>
+            ))}
+          </span>
+        </div>
+      )}
 
       <Link to={`/portal/documents/${active}`} className="card linkcard">
         <div className="spread">

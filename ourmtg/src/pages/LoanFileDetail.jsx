@@ -8,7 +8,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { getFileDetail, reviewDoc, setPreapproval, createInvite, requestDoc, setCondition, setLoanFile } from '../lib/api'
 import { money, shortDate, relTime } from '../lib/format'
-import { STAGE_STEPS, STAGE_LABEL } from '../lib/pipeline'
+import { STAGE_STEPS, STAGE_LABEL, STAGE_COLOR } from '../lib/pipeline'
 import StatusTracker from '../components/StatusTracker'
 import MessageThread from '../components/MessageThread'
 import { Alert, Spinner, StatusChip, Empty } from '../components/ui'
@@ -172,12 +172,13 @@ export default function LoanFileDetail() {
   return (
     <>
       <Link to="/portal" className="backlink">← Back to dashboard</Link>
+      <p className="fileno">File № {String(file.loanFileId).slice(0, 8).toUpperCase()}{file.loanNumber ? ` · Loan #${file.loanNumber}` : ''}</p>
       <div className="spread">
         <h1 className="mb0">{file.borrowerName || 'Loan file'}</h1>
-        <span className="chip">{file.stageLabel}</span>
+        <span className="stamp ink" style={{ '--stage': STAGE_COLOR[file.stage] }}>{file.stageLabel}</span>
       </div>
       <p className="muted">
-        {[file.loanType, file.purpose, file.loanNumber && `#${file.loanNumber}`].filter(Boolean).join(' · ')}
+        {[file.loanType, file.purpose].filter(Boolean).join(' · ')}
         {file.amount != null && ` · ${money(file.amount)}`}
       </p>
 

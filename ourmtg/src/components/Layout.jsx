@@ -38,7 +38,7 @@ export default function Layout() {
     <div className="app">
       <header className="topbar">
         <div className="container">
-          <Link to="/" className="brand">Our<span>MTG</span></Link>
+          <Link to="/" className="brand">our<span>mtg</span></Link>
           <nav className="topbar-actions">
             {user ? (
               <>
