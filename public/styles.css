@@ -475,3 +475,32 @@ section { padding: 76px 0; }
   .field.two { grid-template-columns: 1fr; }
   .decode-row { grid-template-columns: 44px 1fr; gap: 14px; }
 }
+
+/* ---- Trust: header phone, license line, who-we-are ---- */
+.site-phone {
+  font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em;
+  color: var(--ink); text-decoration: none; white-space: nowrap;
+}
+.site-phone:hover { text-decoration: underline; }
+.fineline.lic { color: var(--muted); border-top: 1px dashed var(--soft); padding-top: 10px; margin-top: 10px; }
+
+.people { border-top: 1.5px solid var(--ink); background: var(--paper-deep); }
+.people-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr); gap: 52px; align-items: start; }
+.people .section-head { margin-bottom: 0; }
+.people-side { position: sticky; top: 78px; }
+
+.cred { margin: 4px 0 14px; }
+.cred > div {
+  display: grid; grid-template-columns: 96px 1fr; gap: 12px; align-items: baseline;
+  padding: 10px 0; border-bottom: 1px dashed var(--soft);
+}
+.cred dt { font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.cred dd { font-weight: 600; font-size: 15px; }
+.cred dd a { color: var(--ink); }
+.cred-note { font-size: 13px; color: var(--muted); margin-bottom: 18px; }
+
+@media (max-width: 760px) {
+  .site-phone { display: none; }
+  .people-grid { grid-template-columns: 1fr; gap: 32px; }
+  .people-side { position: static; }
+}
