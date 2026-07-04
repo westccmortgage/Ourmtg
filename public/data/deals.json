@@ -1,9 +1,49 @@
 {
   "deals": [
-    { "type": "Fix & flip",             "county": "Los Angeles County, CA", "ltv": 64, "term": 12, "yield": 9.50,  "amount": "$480K – $620K", "note": "value-add single-family · experienced operator · clear resale exit" },
-    { "type": "Purchase bridge",        "county": "Orange County, CA",      "ltv": 60, "term": 9,  "yield": 9.00,  "amount": "$700K – $900K", "note": "short-term bridge · refinance takeout identified" },
-    { "type": "Cash-out refinance",     "county": "San Diego County, CA",   "ltv": 65, "term": 12, "yield": 9.75,  "amount": "$500K – $750K", "note": "investment property · seasoned rental income" },
-    { "type": "Ground-up construction", "county": "Riverside County, CA",   "ltv": 62, "term": 18, "yield": 10.50, "amount": "$1.1M – $1.4M", "note": "infill SFR · licensed GC · permits in hand" },
-    { "type": "Rate-term refinance",    "county": "Ventura County, CA",     "ltv": 58, "term": 12, "yield": 8.75,  "amount": "$450K – $600K", "note": "first-lien takeout · strong equity position" }
+    {
+      "type": "Fix & flip",
+      "county": "Los Angeles County, CA",
+      "ltv": 64,
+      "term": 12,
+      "yield": 9.5,
+      "amount": "$480K – $620K",
+      "note": "value-add single-family · experienced operator · clear resale exit"
+    },
+    {
+      "type": "Purchase bridge",
+      "county": "Orange County, CA",
+      "ltv": 60,
+      "term": 9,
+      "yield": 9,
+      "amount": "$700K – $900K",
+      "note": "short-term bridge · refinance takeout identified"
+    },
+    {
+      "type": "Ground-up construction",
+      "county": "Riverside County, CA",
+      "ltv": 62,
+      "term": 18,
+      "yield": 10.5,
+      "amount": "$1.1M – $1.4M",
+      "note": "infill SFR · licensed GC · permits in hand"
+    },
+    {
+      "type": "Rate-term refinance",
+      "county": "Ventura County, CA",
+      "ltv": 58,
+      "term": 12,
+      "yield": 8.75,
+      "amount": "$450K – $600K",
+      "note": "first-lien takeout · strong equity position"
+    },
+    {
+      "type": "Mid Construction ",
+      "county": "Beverly Hills, CA",
+      "ltv": 68,
+      "term": 14,
+      "yield": 10.5,
+      "amount": "400-500",
+      "note": "Strong, mid construction"
+    }
   ]
 }
