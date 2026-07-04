@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Private Note Capital — Private credit, secured by real estate</title>
 <meta name="description" content="A private, access-controlled platform for investing in first-lien mortgage notes secured by California real estate. Model your target yield, understand the structure, and request access to reviewed opportunities.">
+<script src="i18n.js"></script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%2317150f'/%3E%3Ctext x='16' y='21' font-family='Arial,sans-serif' font-weight='bold' font-size='13' fill='%23f7f5f0' text-anchor='middle'%3EPN%3C/text%3E%3C/svg%3E">
 <script>document.documentElement.classList.add('js');</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -18,13 +19,14 @@
   <div class="shell header-row">
     <a class="wordmark" href="#top">Private&nbsp;Note&nbsp;Capital</a>
     <nav class="site-nav" aria-label="Primary">
-      <a href="#opportunities">Opportunities</a>
-      <a href="#guidelines">Guidelines</a>
-      <a href="#secured">Security</a>
-      <a href="#people">Who we are</a>
+      <a href="#opportunities" data-i18n="nav.opportunities">Opportunities</a>
+      <a href="#guidelines" data-i18n="nav.guidelines">Guidelines</a>
+      <a href="#secured" data-i18n="nav.security">Security</a>
+      <a href="#people" data-i18n="nav.people">Who we are</a>
     </nav>
+    <span id="pnc-lang"></span>
     <a class="site-phone" href="tel:3106865053">(310)&nbsp;686-5053</a>
-    <a class="btn btn-primary btn-sm" href="#access">Request access</a>
+    <a class="btn btn-primary btn-sm" href="#access" data-i18n="btn.requestAccess">Request access</a>
   </div>
 </header>
 
@@ -34,31 +36,31 @@
   <section class="hero">
     <div class="shell hero-grid">
       <div class="hero-copy reveal">
-        <p class="kicker">Private Note Capital · access by request · California</p>
-        <h1>private credit,<br><span class="lt">properly papered.</span></h1>
-        <p class="lede">
+        <p class="kicker" data-i18n="hero.kicker">Private Note Capital · access by request · California</p>
+        <h1 data-i18n="hero.h1">private credit,<br><span class="lt">properly papered.</span></h1>
+        <p class="lede" data-i18n="hero.lede">
           Qualified investors earn fixed monthly income from first-lien mortgage notes
           secured by California real estate. Every note is backed by a recorded deed of
           trust, underwritten to conservative loan-to-value, and serviced under license.
         </p>
         <div class="hero-actions">
-          <a class="btn btn-primary" href="#access">Request access</a>
-          <a class="btn btn-ghost" href="#secured">How it’s secured</a>
+          <a class="btn btn-primary" href="#access" data-i18n="btn.requestAccess">Request access</a>
+          <a class="btn btn-ghost" href="#secured" data-i18n="btn.howSecured">How it’s secured</a>
         </div>
-        <p class="fineline">For qualified investors. Access is granted by review, not by signup.</p>
-        <p class="fineline lic">Operated by West Coast Capital Mortgage Inc. · Licensed in California · NMLS #2817729 · CA DRE #01385024 · A real person answers.</p>
+        <p class="fineline" data-i18n="hero.fineline1">For qualified investors. Access is granted by review, not by signup.</p>
+        <p class="fineline lic" data-i18n="hero.lic">Operated by West Coast Capital Mortgage Inc. · Licensed in California · NMLS #2817729 · CA DRE #01385024 · A real person answers.</p>
         <div class="wire" aria-hidden="true"></div>
       </div>
 
       <!-- Live yield model — the investor's own numbers -->
       <div class="calc reveal" aria-label="Illustrative note income model">
         <div class="calc-head">
-          <span class="file-no">Model · illustrative</span>
-          <span class="file-status"><span class="status-dot" aria-hidden="true"></span>Target yield</span>
+          <span class="file-no" data-i18n="calc.modelTag">Model · illustrative</span>
+          <span class="file-status"><span class="status-dot" aria-hidden="true"></span><span data-i18n="calc.targetYieldStatus">Target yield</span></span>
         </div>
         <div class="calc-body">
           <div class="field">
-            <label for="c-amount">Amount invested</label>
+            <label for="c-amount" data-i18n="calc.amountLabel">Amount invested</label>
             <input id="c-amount" inputmode="numeric" autocomplete="off" value="$100,000">
             <div class="chips" role="group" aria-label="Quick amounts">
               <button type="button" data-amt="50000">$50K</button>
@@ -68,7 +70,7 @@
             </div>
           </div>
           <div class="field">
-            <label for="c-profile">Note profile — our guidelines</label>
+            <label for="c-profile" data-i18n="calc.profileLabel">Note profile — our guidelines</label>
             <select id="c-profile">
               <option value="conservative">Conservative — 1st lien · ≤60% LTV · 8.5%</option>
               <option value="core" selected>Core — 1st lien · ≤65% LTV · 9.5%</option>
@@ -78,19 +80,19 @@
 
           <div class="calc-out">
             <div class="calc-yield">
-              <span class="lbl">Target annual yield</span>
+              <span class="lbl" data-i18n="calc.targetAnnual">Target annual yield</span>
               <span class="big" id="o-yield">9.50%</span>
             </div>
             <div class="calc-metrics">
-              <div><span class="lbl">Monthly income</span><span class="v" id="o-monthly">$792</span></div>
-              <div><span class="lbl">Annual income</span><span class="v" id="o-annual">$9,500</span></div>
-              <div><span class="lbl">At term</span><span class="v" id="o-term">$9,500</span></div>
+              <div><span class="lbl" data-i18n="calc.monthly">Monthly income</span><span class="v" id="o-monthly">$792</span></div>
+              <div><span class="lbl" data-i18n="calc.annual">Annual income</span><span class="v" id="o-annual">$9,500</span></div>
+              <div><span class="lbl" data-i18n="calc.atTerm">At term</span><span class="v" id="o-term">$9,500</span></div>
             </div>
             <p class="calc-terms" id="o-terms">First lien · ≤65% LTV · interest-only · paid monthly · 12-month term · min $50,000</p>
           </div>
 
-          <a class="btn btn-primary btn-wide" href="#access">Request access to opportunities like this</a>
-          <p class="fineline">Illustrative only. Target yields reflect current program guidelines, are not guaranteed, and vary by opportunity. Notes are interest-only; principal is returned at payoff. This is not an offer.</p>
+          <a class="btn btn-primary btn-wide" href="#access" data-i18n="btn.requestLikeThis">Request access to opportunities like this</a>
+          <p class="fineline" data-i18n="calc.fineline">Illustrative only. Target yields reflect current program guidelines, are not guaranteed, and vary by opportunity. Notes are interest-only; principal is returned at payoff. This is not an offer.</p>
         </div>
       </div>
     </div>
@@ -99,8 +101,8 @@
   <!-- ============ SERVICING TICKER ============ -->
   <div class="ticker" aria-hidden="true">
     <span class="tk">
-      <span>&nbsp;<b>09:12</b> may payment received — note 011 current · <b>08:47</b> title policy verified — file 014 · <b>08:15</b> appraisal reviewed — riverside county · <b>07:52</b> servicing report issued — q2 · <b>07:30</b> deed of trust recorded — file 012 ·</span>
-      <span>&nbsp;<b>09:12</b> may payment received — note 011 current · <b>08:47</b> title policy verified — file 014 · <b>08:15</b> appraisal reviewed — riverside county · <b>07:52</b> servicing report issued — q2 · <b>07:30</b> deed of trust recorded — file 012 ·</span>
+      <span data-i18n="ticker.text">&nbsp;<b>09:12</b> may payment received — note 011 current · <b>08:47</b> title policy verified — file 014 · <b>08:15</b> appraisal reviewed — riverside county · <b>07:52</b> servicing report issued — q2 · <b>07:30</b> deed of trust recorded — file 012 ·</span>
+      <span data-i18n="ticker.text">&nbsp;<b>09:12</b> may payment received — note 011 current · <b>08:47</b> title policy verified — file 014 · <b>08:15</b> appraisal reviewed — riverside county · <b>07:52</b> servicing report issued — q2 · <b>07:30</b> deed of trust recorded — file 012 ·</span>
     </span>
   </div>
 
@@ -108,9 +110,9 @@
   <section class="secured" id="secured">
     <div class="shell">
       <div class="section-head reveal">
-        <p class="kicker">The structure</p>
-        <h2>What actually stands behind your capital.</h2>
-        <p class="section-lede">
+        <p class="kicker" data-i18n="secured.kicker">The structure</p>
+        <h2 data-i18n="secured.h2">What actually stands behind your capital.</h2>
+        <p class="section-lede" data-i18n="secured.lede">
           You are not lending on a promise. You are lending against a specific property,
           in first position, with the paper recorded in the county. Four things do the work.
         </p>
@@ -119,32 +121,32 @@
         <div class="decode-row reveal">
           <span class="decode-no">01</span>
           <div class="decode-body">
-            <h3>The promissory note</h3>
-            <p>The borrower’s written, legally binding promise to repay a set amount at a set rate.
+            <h3 data-i18n="secured.01.h">The promissory note</h3>
+            <p data-i18n="secured.01.p">The borrower’s written, legally binding promise to repay a set amount at a set rate.
             This is the instrument you own, and the source of your monthly interest.</p>
           </div>
         </div>
         <div class="decode-row reveal">
           <span class="decode-no">02</span>
           <div class="decode-body">
-            <h3>The deed of trust</h3>
-            <p>Recorded against the property in the county. It is the enforcement mechanism: if the
+            <h3 data-i18n="secured.02.h">The deed of trust</h3>
+            <p data-i18n="secured.02.p">Recorded against the property in the county. It is the enforcement mechanism: if the
             note isn’t paid, the deed of trust is what lets the loan be satisfied out of the real estate.</p>
           </div>
         </div>
         <div class="decode-row reveal">
           <span class="decode-no">03</span>
           <div class="decode-body">
-            <h3>First-lien position</h3>
-            <p>You are first in line. Before any junior lender, and before the owner sees a dollar of
+            <h3 data-i18n="secured.03.h">First-lien position</h3>
+            <p data-i18n="secured.03.p">You are first in line. Before any junior lender, and before the owner sees a dollar of
             equity, proceeds from the property go to the first lien — you. Position is priority.</p>
           </div>
         </div>
         <div class="decode-row reveal">
           <span class="decode-no">04</span>
           <div class="decode-body">
-            <h3>Loan-to-value — your margin of safety</h3>
-            <p>A note at 65% LTV means the loan is 65% of the property’s value. The property would have
+            <h3 data-i18n="secured.04.h">Loan-to-value — your margin of safety</h3>
+            <p data-i18n="secured.04.p">A note at 65% LTV means the loan is 65% of the property’s value. The property would have
             to lose more than <strong>35%</strong> of its value before your principal is mathematically
             at risk. Lower LTV, thicker cushion.</p>
           </div>
@@ -157,9 +159,9 @@
   <section class="guidelines" id="guidelines">
     <div class="shell">
       <div class="section-head reveal">
-        <p class="kicker">Our guidelines</p>
-        <h2>The lines we lend inside.</h2>
-        <p class="section-lede">
+        <p class="kicker" data-i18n="gl.kicker">Our guidelines</p>
+        <h2 data-i18n="gl.h2">The lines we lend inside.</h2>
+        <p class="section-lede" data-i18n="gl.lede">
           Every opportunity we prepare fits one of these profiles. The discipline is in the box —
           first lien, conservative LTV, short term, monthly interest. We don’t chase yield by
           loosening the collateral.
@@ -167,12 +169,12 @@
       </div>
       <div class="ledger reveal" id="pnc-ledger" role="table" aria-label="Note profiles">
         <div class="ledger-head" role="row">
-          <span role="columnheader">Profile</span>
-          <span role="columnheader">Lien</span>
-          <span role="columnheader">Max LTV</span>
-          <span role="columnheader">Target yield</span>
-          <span role="columnheader">Term</span>
-          <span role="columnheader">Minimum</span>
+          <span role="columnheader" data-i18n="gl.h.profile">Profile</span>
+          <span role="columnheader" data-i18n="gl.h.lien">Lien</span>
+          <span role="columnheader" data-i18n="gl.h.maxltv">Max LTV</span>
+          <span role="columnheader" data-i18n="gl.h.yield">Target yield</span>
+          <span role="columnheader" data-i18n="gl.h.term">Term</span>
+          <span role="columnheader" data-i18n="gl.h.min">Minimum</span>
         </div>
         <div class="ledger-row" role="row">
           <span role="cell" data-l="Profile"><strong>Conservative</strong></span>
@@ -199,7 +201,7 @@
           <span role="cell" data-l="Minimum">$100,000</span>
         </div>
       </div>
-      <p class="fineline reveal">Guidelines describe the box we work within; specific terms are set per opportunity and disclosed in full inside the deal room. Target yields are not guaranteed. All investments involve risk, including loss of principal.</p>
+      <p class="fineline reveal" data-i18n="gl.fineline">Guidelines describe the box we work within; specific terms are set per opportunity and disclosed in full inside the deal room. Target yields are not guaranteed. All investments involve risk, including loss of principal.</p>
     </div>
   </section>
 
@@ -207,9 +209,9 @@
   <section class="opps" id="opportunities">
     <div class="shell">
       <div class="section-head reveal">
-        <p class="kicker">This week · access by request</p>
-        <h2>What we’re funding now.</h2>
-        <p class="section-lede">
+        <p class="kicker" data-i18n="opps.kicker">This week · access by request</p>
+        <h2 data-i18n="opps.h2">What we’re funding now.</h2>
+        <p class="section-lede" data-i18n="opps.lede">
           Real files move fast — they’re shown to a small number of investors and often fill within
           days of release. You don’t chase a single deal here; you get <strong>first look at the
           flow</strong>. Below is the kind of file open this week. The live file, with address and
@@ -220,31 +222,31 @@
       <div class="opps-grid">
         <!-- Rotating featured file (representative; specifics redacted) -->
         <article class="notefile reveal" id="dealweek" aria-label="This week's representative opportunity">
-          <span class="stamp" aria-label="Open">Open</span>
+          <span class="stamp" aria-label="Open" data-i18n="opps.stampOpen">Open</span>
           <header class="notefile-head">
             <span class="file-no" id="dw-no">FILE OF THE WEEK · PNC-2026-0XX</span>
-            <span class="file-status"><span class="status-dot" aria-hidden="true"></span>Accepting review</span>
+            <span class="file-status"><span class="status-dot" aria-hidden="true"></span><span data-i18n="opps.dwStatus">Accepting review</span></span>
           </header>
           <dl class="notefile-body">
-            <div class="nf-row"><dt>Type</dt><dd id="dw-type">Fix &amp; flip</dd></div>
-            <div class="nf-row"><dt>Location</dt><dd><span id="dw-county">Los Angeles County, CA</span> · <span class="redact" style="--w:70px"></span></dd></div>
-            <div class="nf-row"><dt>Loan amount</dt><dd id="dw-amount">$480K–$620K</dd></div>
+            <div class="nf-row"><dt data-i18n="dw.type">Type</dt><dd id="dw-type">Fix &amp; flip</dd></div>
+            <div class="nf-row"><dt data-i18n="dw.location">Location</dt><dd><span id="dw-county">Los Angeles County, CA</span> · <span class="redact" style="--w:70px"></span></dd></div>
+            <div class="nf-row"><dt data-i18n="dw.amount">Loan amount</dt><dd id="dw-amount">$480K–$620K</dd></div>
             <div class="nf-row nf-ltv">
-              <dt>LTV</dt>
+              <dt data-i18n="dw.ltv">LTV</dt>
               <dd><span class="ltv-num" id="dw-ltv">64%</span>
                 <span class="ltv-track" aria-hidden="true"><span class="ltv-fill" id="dw-ltvfill" style="--ltv:64%"></span></span></dd>
             </div>
-            <div class="nf-row"><dt>Target yield</dt><dd><span class="fig" id="dw-yield">9.50%</span> · 1st lien · interest-only</dd></div>
-            <div class="nf-row"><dt>Term</dt><dd id="dw-term">12 months · monthly servicing</dd></div>
-            <div class="nf-row"><dt>Notes</dt><dd id="dw-note" class="dim">experienced operator · clear exit</dd></div>
+            <div class="nf-row"><dt data-i18n="dw.yield">Target yield</dt><dd><span class="fig" id="dw-yield">9.50%</span> · <span data-i18n="opps.dwLienIO">1st lien · interest-only</span></dd></div>
+            <div class="nf-row"><dt data-i18n="dw.term">Term</dt><dd id="dw-term">12 months · monthly servicing</dd></div>
+            <div class="nf-row"><dt data-i18n="dw.notes">Notes</dt><dd id="dw-note" class="dim">experienced operator · clear exit</dd></div>
           </dl>
           <footer class="notefile-docs">
-            <p class="docs-label">Full file in the deal room</p>
+            <p class="docs-label" data-i18n="dw.docsLabel">Full file in the deal room</p>
             <ul class="docs-list">
-              <li class="doc checked">Promissory note</li>
-              <li class="doc checked">Deed of trust</li>
-              <li class="doc checked">Title &amp; appraisal</li>
-              <li class="doc checked">Servicing terms</li>
+              <li class="doc checked" data-i18n="doc.note">Promissory note</li>
+              <li class="doc checked" data-i18n="doc.deed">Deed of trust</li>
+              <li class="doc checked" data-i18n="doc.title">Title &amp; appraisal</li>
+              <li class="doc checked" data-i18n="doc.servicing">Servicing terms</li>
             </ul>
           </footer>
         </article>
@@ -252,32 +254,32 @@
         <!-- First-look hook + live pipeline aggregate -->
         <div class="opps-side reveal">
           <div class="quiet-card firstlook">
-            <p class="quiet-title">Get first look at the flow</p>
-            <p>Approved investors see each week’s file <strong>before</strong> it’s shown widely. When
+            <p class="quiet-title" data-i18n="firstlook.title">Get first look at the flow</p>
+            <p data-i18n="firstlook.p">Approved investors see each week’s file <strong>before</strong> it’s shown widely. When
             one fills, the next is already coming — first-look means you’re never watching from outside.</p>
-            <a class="btn btn-primary btn-wide" href="#access">Join the first-look list</a>
-            <a class="btn btn-ghost btn-wide" href="tel:3106865053" style="margin-top:10px">Or call (310) 686-5053</a>
+            <a class="btn btn-primary btn-wide" href="#access" data-i18n="btn.joinFirstLook">Join the first-look list</a>
+            <a class="btn btn-ghost btn-wide" href="tel:3106865053" style="margin-top:10px" data-i18n="btn.orCall">Or call (310) 686-5053</a>
           </div>
           <div class="pipeline">
-            <p class="pipeline-label">Pipeline this week</p>
+            <p class="pipeline-label" data-i18n="pipeline.label">Pipeline this week</p>
             <div class="pipeline-metrics">
-              <div><span class="v" id="pl-files">3</span><span class="l">files in review</span></div>
-              <div><span class="v" id="pl-seeking">$1.9M</span><span class="l">seeking</span></div>
-              <div><span class="v" id="pl-ltv">62%</span><span class="l">avg LTV · 1st lien</span></div>
+              <div><span class="v" id="pl-files">3</span><span class="l" data-i18n="pipeline.files">files in review</span></div>
+              <div><span class="v" id="pl-seeking">$1.9M</span><span class="l" data-i18n="pipeline.seeking">seeking</span></div>
+              <div><span class="v" id="pl-ltv">62%</span><span class="l" data-i18n="pipeline.ltv">avg LTV · 1st lien</span></div>
             </div>
           </div>
         </div>
       </div>
 
-      <p class="fineline reveal">
+      <p class="fineline reveal" data-i18n="opps.fineline">
         Representative of current pipeline; not a specific offer. Trust-deed investments are arranged
         through West Coast Capital Mortgage Inc. (CA DRE #01385024); approved investors receive full
         written disclosures before funding any note. Offered privately to qualified investors only.
       </p>
 
       <div class="otherside reveal">
-        <div><strong>On the other side — need capital for a project?</strong> We fund fix &amp; flip, bridge, cash-out, and ground-up construction against California real estate. Bring us the scenario; strong files become next week’s opportunity.</div>
-        <a class="btn btn-ghost btn-sm" href="tel:3106865053">Submit a scenario</a>
+        <div data-i18n="otherside"><strong>On the other side — need capital for a project?</strong> We fund fix &amp; flip, bridge, cash-out, and ground-up construction against California real estate. Bring us the scenario; strong files become next week’s opportunity.</div>
+        <a class="btn btn-ghost btn-sm" href="tel:3106865053" data-i18n="btn.submitScenario">Submit a scenario</a>
       </div>
     </div>
   </section>
@@ -285,7 +287,7 @@
   <!-- ============ WHAT THIS IS NOT ============ -->
   <section class="not-strip">
     <div class="shell reveal">
-      <p class="not-line">
+      <p class="not-line" data-i18n="not.line">
         <strong>This is not a marketplace.</strong> Not crowdfunding, not a pooled fund, not a
         yield promise. One note, one property, one file at a time — shown to a small number of
         qualified investors, and only after it clears review.
@@ -297,35 +299,35 @@
   <section class="process" id="process">
     <div class="shell">
       <div class="section-head reveal">
-        <p class="kicker">Process</p>
-        <h2>How capital works here.</h2>
-        <p class="section-lede">Five stages, in order. No stage is skipped, and no file moves forward without the previous stage on paper.</p>
+        <p class="kicker" data-i18n="process.kicker">Process</p>
+        <h2 data-i18n="process.h2">How capital works here.</h2>
+        <p class="section-lede" data-i18n="process.lede">Five stages, in order. No stage is skipped, and no file moves forward without the previous stage on paper.</p>
       </div>
       <ol class="steps">
         <li class="step reveal">
           <span class="step-no">01</span>
-          <h3>Scenario is reviewed</h3>
-          <p>The borrower, the purpose of the loan, and the exit — how they pay you back — are vetted before anything else is discussed. A loan without a credible exit doesn’t get written.</p>
+          <h3 data-i18n="step.01.h">Scenario is reviewed</h3>
+          <p data-i18n="step.01.p">The borrower, the purpose of the loan, and the exit — how they pay you back — are vetted before anything else is discussed. A loan without a credible exit doesn’t get written.</p>
         </li>
         <li class="step reveal">
           <span class="step-no">02</span>
-          <h3>Collateral is analyzed</h3>
-          <p>Independent valuation, lien position, title condition, and market context. The property, not the borrower’s optimism, has to carry the note — and carry it with room to spare.</p>
+          <h3 data-i18n="step.02.h">Collateral is analyzed</h3>
+          <p data-i18n="step.02.p">Independent valuation, lien position, title condition, and market context. The property, not the borrower’s optimism, has to carry the note — and carry it with room to spare.</p>
         </li>
         <li class="step reveal">
           <span class="step-no">03</span>
-          <h3>Note package is prepared</h3>
-          <p>Promissory note, deed of trust, title policy, insurance, and servicing agreement are drafted and assembled into one complete file — the same file you’ll read before you commit.</p>
+          <h3 data-i18n="step.03.h">Note package is prepared</h3>
+          <p data-i18n="step.03.p">Promissory note, deed of trust, title policy, insurance, and servicing agreement are drafted and assembled into one complete file — the same file you’ll read before you commit.</p>
         </li>
         <li class="step reveal">
           <span class="step-no">04</span>
-          <h3>Investor reviews the opportunity</h3>
-          <p>The full file opens in the deal room. You read the documents, see the numbers, ask questions, and decide on your own timeline. Nothing auto-invests; nothing is rushed.</p>
+          <h3 data-i18n="step.04.h">Investor reviews the opportunity</h3>
+          <p data-i18n="step.04.p">The full file opens in the deal room. You read the documents, see the numbers, ask questions, and decide on your own timeline. Nothing auto-invests; nothing is rushed.</p>
         </li>
         <li class="step reveal">
           <span class="step-no">05</span>
-          <h3>Servicing tracks every payment</h3>
-          <p>After funding, licensed servicing handles collections, statements, escrow of taxes and insurance, and reporting. You receive income and records — you don’t chase a borrower.</p>
+          <h3 data-i18n="step.05.h">Servicing tracks every payment</h3>
+          <p data-i18n="step.05.p">After funding, licensed servicing handles collections, statements, escrow of taxes and insurance, and reporting. You receive income and records — you don’t chase a borrower.</p>
         </li>
       </ol>
     </div>
@@ -335,19 +337,19 @@
   <section class="default" id="risk">
     <div class="shell default-grid">
       <div class="section-head reveal">
-        <p class="kicker">The honest part</p>
-        <h2>If a borrower doesn’t pay.</h2>
-        <p class="section-lede">
+        <p class="kicker" data-i18n="risk.kicker">The honest part</p>
+        <h2 data-i18n="risk.h2">If a borrower doesn’t pay.</h2>
+        <p class="section-lede" data-i18n="risk.lede">
           Trust is built by explaining the downside plainly, before you ask about the upside.
           Here is exactly what stands between a missed payment and your principal.
         </p>
       </div>
       <div class="default-side reveal">
         <ol class="default-steps">
-          <li><strong>Servicing works the borrower first.</strong> Contact, cure, and default interest and late fees begin accruing — to you.</li>
-          <li><strong>The deed of trust is enforced.</strong> If it isn’t cured, first-lien position lets the collateral be sold to recover principal and accrued interest.</li>
-          <li><strong>Conservative LTV is the cushion.</strong> Lending at 60–70% of value means there is equity between your loan and the property’s worth to absorb costs and time.</li>
-          <li><strong>The risk is still real.</strong> Real estate can decline, recovery takes time, and loss of principal is possible. Collateral reduces risk; it does not remove it.</li>
+          <li data-i18n="risk.1"><strong>Servicing works the borrower first.</strong> Contact, cure, and default interest and late fees begin accruing — to you.</li>
+          <li data-i18n="risk.2"><strong>The deed of trust is enforced.</strong> If it isn’t cured, first-lien position lets the collateral be sold to recover principal and accrued interest.</li>
+          <li data-i18n="risk.3"><strong>Conservative LTV is the cushion.</strong> Lending at 60–70% of value means there is equity between your loan and the property’s worth to absorb costs and time.</li>
+          <li data-i18n="risk.4"><strong>The risk is still real.</strong> Real estate can decline, recovery takes time, and loss of principal is possible. Collateral reduces risk; it does not remove it.</li>
         </ol>
       </div>
     </div>
@@ -357,21 +359,21 @@
   <section class="terms" id="terms">
     <div class="shell">
       <div class="section-head reveal">
-        <p class="kicker">Plain English</p>
-        <h2>The terms, decoded.</h2>
-        <p class="section-lede">The vocabulary of note investing, without the mystique. If a document uses a word we haven’t explained, that’s on us.</p>
+        <p class="kicker" data-i18n="terms.kicker">Plain English</p>
+        <h2 data-i18n="terms.h2">The terms, decoded.</h2>
+        <p class="section-lede" data-i18n="terms.lede">The vocabulary of note investing, without the mystique. If a document uses a word we haven’t explained, that’s on us.</p>
       </div>
       <div class="glossary">
-        <div class="gl reveal"><dt>Loan-to-value (LTV)</dt><dd>The loan as a percentage of the property’s value. Lower is safer — it’s the cushion before principal is at risk.</dd></div>
-        <div class="gl reveal"><dt>Lien position</dt><dd>Your place in line for repayment from the property. First lien is paid before all juniors and before owner equity.</dd></div>
-        <div class="gl reveal"><dt>Promissory note</dt><dd>The borrower’s binding promise to repay at a stated rate and term. The asset you actually own.</dd></div>
-        <div class="gl reveal"><dt>Deed of trust</dt><dd>The recorded document that ties the note to the property and allows enforcement if the note isn’t paid.</dd></div>
-        <div class="gl reveal"><dt>Servicing</dt><dd>Licensed collection of payments, escrows, statements, and reporting — so you receive income, not a second job.</dd></div>
-        <div class="gl reveal"><dt>Exit / takeout</dt><dd>How the borrower repays you: a sale, a refinance, or completed business plan. A credible exit is required.</dd></div>
-        <div class="gl reveal"><dt>Interest-only</dt><dd>The borrower pays interest monthly; the full principal is returned at payoff. It’s what keeps your income level.</dd></div>
-        <div class="gl reveal"><dt>Title policy</dt><dd>Insurance confirming the lien is valid and in the position promised, with no undisclosed claims ahead of you.</dd></div>
-        <div class="gl reveal"><dt>Reserve</dt><dd>Cash set aside — by the borrower or the structure — to cover payments or taxes if timing slips.</dd></div>
-        <div class="gl reveal"><dt>Seasoning</dt><dd>The track record of on-time payments a note has already made. More seasoning, more evidence.</dd></div>
+        <div class="gl reveal"><dt data-i18n="gl1.t">Loan-to-value (LTV)</dt><dd data-i18n="gl1.d">The loan as a percentage of the property’s value. Lower is safer — it’s the cushion before principal is at risk.</dd></div>
+        <div class="gl reveal"><dt data-i18n="gl2.t">Lien position</dt><dd data-i18n="gl2.d">Your place in line for repayment from the property. First lien is paid before all juniors and before owner equity.</dd></div>
+        <div class="gl reveal"><dt data-i18n="gl3.t">Promissory note</dt><dd data-i18n="gl3.d">The borrower’s binding promise to repay at a stated rate and term. The asset you actually own.</dd></div>
+        <div class="gl reveal"><dt data-i18n="gl4.t">Deed of trust</dt><dd data-i18n="gl4.d">The recorded document that ties the note to the property and allows enforcement if the note isn’t paid.</dd></div>
+        <div class="gl reveal"><dt data-i18n="gl5.t">Servicing</dt><dd data-i18n="gl5.d">Licensed collection of payments, escrows, statements, and reporting — so you receive income, not a second job.</dd></div>
+        <div class="gl reveal"><dt data-i18n="gl6.t">Exit / takeout</dt><dd data-i18n="gl6.d">How the borrower repays you: a sale, a refinance, or completed business plan. A credible exit is required.</dd></div>
+        <div class="gl reveal"><dt data-i18n="gl7.t">Interest-only</dt><dd data-i18n="gl7.d">The borrower pays interest monthly; the full principal is returned at payoff. It’s what keeps your income level.</dd></div>
+        <div class="gl reveal"><dt data-i18n="gl8.t">Title policy</dt><dd data-i18n="gl8.d">Insurance confirming the lien is valid and in the position promised, with no undisclosed claims ahead of you.</dd></div>
+        <div class="gl reveal"><dt data-i18n="gl9.t">Reserve</dt><dd data-i18n="gl9.d">Cash set aside — by the borrower or the structure — to cover payments or taxes if timing slips.</dd></div>
+        <div class="gl reveal"><dt data-i18n="gl10.t">Seasoning</dt><dd data-i18n="gl10.d">The track record of on-time payments a note has already made. More seasoning, more evidence.</dd></div>
       </div>
     </div>
   </section>
@@ -380,25 +382,25 @@
   <section class="working" id="working">
     <div class="shell">
       <div class="section-head reveal">
-        <p class="kicker">The relationship</p>
-        <h2>What working with us means.</h2>
+        <p class="kicker" data-i18n="working.kicker">The relationship</p>
+        <h2 data-i18n="working.h2">What working with us means.</h2>
       </div>
       <div class="pillar-grid">
         <article class="pillar reveal">
-          <h3>We originate under license</h3>
-          <p>Files are underwritten and prepared under licensed mortgage origination and servicing oversight — not resold from a borrower’s self-report.</p>
+          <h3 data-i18n="work.1.h">We originate under license</h3>
+          <p data-i18n="work.1.p">Files are underwritten and prepared under licensed mortgage origination and servicing oversight — not resold from a borrower’s self-report.</p>
         </article>
         <article class="pillar reveal">
-          <h3>We service, so you don’t</h3>
-          <p>Collections, escrows, statements, and reporting are handled for you. Your job is to read the file and decide; ours is everything after.</p>
+          <h3 data-i18n="work.2.h">We service, so you don’t</h3>
+          <p data-i18n="work.2.p">Collections, escrows, statements, and reporting are handled for you. Your job is to read the file and decide; ours is everything after.</p>
         </article>
         <article class="pillar reveal">
-          <h3>We disclose in full</h3>
-          <p>Collateral, LTV, lien, title, and the complete document package are open before you commit. No summary stands in for the paper.</p>
+          <h3 data-i18n="work.3.h">We disclose in full</h3>
+          <p data-i18n="work.3.p">Collateral, LTV, lien, title, and the complete document package are open before you commit. No summary stands in for the paper.</p>
         </article>
         <article class="pillar reveal">
-          <h3>We keep the room small</h3>
-          <p>Limited opportunities, reviewed access, one file at a time. Discipline is easier to keep when the room isn’t crowded.</p>
+          <h3 data-i18n="work.4.h">We keep the room small</h3>
+          <p data-i18n="work.4.p">Limited opportunities, reviewed access, one file at a time. Discipline is easier to keep when the room isn’t crowded.</p>
         </article>
       </div>
     </div>
@@ -408,20 +410,20 @@
   <section class="people" id="people">
     <div class="shell people-grid">
       <div class="section-head reveal">
-        <p class="kicker">Who’s behind the paper</p>
-        <h2>Real company. Real licenses.<br>A real phone number.</h2>
-        <p class="section-lede">
+        <p class="kicker" data-i18n="people.kicker">Who’s behind the paper</p>
+        <h2 data-i18n="people.h2">Real company. Real licenses.<br>A real phone number.</h2>
+        <p class="section-lede" data-i18n="people.lede">
           Private Note Capital is operated by <strong>West Coast Capital Mortgage Inc.</strong> — a
           licensed California mortgage company that originates and services these loans itself.
           You can look up the license, read the whole file, and talk to a person before you commit
           a single dollar. Comfort, for us, means nothing about us is hard to check.
         </p>
         <ul class="dealroom-list">
-          <li>Licensed origination and servicing — regulated, not a marketplace middleman</li>
-          <li>Every access request is read and answered by a person, usually same day</li>
-          <li>Call, ask the hard questions, take your time — no funnel, no pressure</li>
+          <li data-i18n="people.li1">Licensed origination and servicing — regulated, not a marketplace middleman</li>
+          <li data-i18n="people.li2">Every access request is read and answered by a person, usually same day</li>
+          <li data-i18n="people.li3">Call, ask the hard questions, take your time — no funnel, no pressure</li>
         </ul>
-        <p class="section-lede" style="margin-top:20px">
+        <p class="section-lede" style="margin-top:20px" data-i18n="people.lede2">
           The same team runs <a href="https://westccmortgage.com" target="_blank" rel="noopener">westccmortgage.com</a>
           and <a href="https://californiamtg.com" target="_blank" rel="noopener">californiamtg.com</a> —
           an established, licensed operation you can see for yourself.
@@ -429,16 +431,16 @@
       </div>
       <div class="people-side reveal">
         <div class="quiet-card">
-          <p class="quiet-title">West Coast Capital Mortgage Inc.</p>
+          <p class="quiet-title" data-i18n="cred.title">West Coast Capital Mortgage Inc.</p>
           <dl class="cred">
-            <div><dt>NMLS</dt><dd>#2817729</dd></div>
-            <div><dt>CA DRE</dt><dd>#01385024</dd></div>
-            <div><dt>Founder</dt><dd>Anatoliy Kanevsky</dd></div>
-            <div><dt>Experience</dt><dd>Decades in CA real estate &amp; mortgage</dd></div>
-            <div><dt>Direct</dt><dd><a href="tel:3106865053">(310) 686-5053</a></dd></div>
+            <div><dt data-i18n="cred.nmls">NMLS</dt><dd>#2817729</dd></div>
+            <div><dt data-i18n="cred.dre">CA DRE</dt><dd>#01385024</dd></div>
+            <div><dt data-i18n="cred.founder">Founder</dt><dd>Anatoliy Kanevsky</dd></div>
+            <div><dt data-i18n="cred.experience">Experience</dt><dd data-i18n="cred.experienceVal">Decades in CA real estate &amp; mortgage</dd></div>
+            <div><dt data-i18n="cred.direct">Direct</dt><dd><a href="tel:3106865053">(310) 686-5053</a></dd></div>
           </dl>
-          <p class="cred-note">Equal Housing Opportunity. A licensed professional reviews every request personally.</p>
-          <a class="btn btn-primary btn-wide" href="tel:3106865053">Call before you invest</a>
+          <p class="cred-note" data-i18n="cred.note">Equal Housing Opportunity. A licensed professional reviews every request personally.</p>
+          <a class="btn btn-primary btn-wide" href="tel:3106865053" data-i18n="btn.callBeforeInvest">Call before you invest</a>
         </div>
       </div>
     </div>
@@ -448,9 +450,9 @@
   <section class="access" id="access">
     <div class="shell access-grid">
       <div class="section-head reveal">
-        <p class="kicker">Access</p>
-        <h2>Request access to the deal room.</h2>
-        <p class="section-lede">
+        <p class="kicker" data-i18n="access.kicker">Access</p>
+        <h2 data-i18n="access.h2">Request access to the deal room.</h2>
+        <p class="section-lede" data-i18n="access.lede">
           Tell us who you are and how you invest. Requests are reviewed personally —
           expect a reply, not an automated onboarding funnel.
         </p>
@@ -459,27 +461,27 @@
         <input type="hidden" name="form-name" value="request-access">
         <p class="hp"><label>Company <input name="company" tabindex="-1" autocomplete="off"></label></p>
         <div class="field">
-          <label for="f-name">Full name</label>
+          <label for="f-name" data-i18n="form.name">Full name</label>
           <input id="f-name" name="name" type="text" required autocomplete="name">
         </div>
         <div class="field">
-          <label for="f-email">Email</label>
+          <label for="f-email" data-i18n="form.email">Email</label>
           <input id="f-email" name="email" type="email" required autocomplete="email">
         </div>
         <div class="field two">
           <div>
-            <label for="f-type">Investing as</label>
+            <label for="f-type" data-i18n="form.investingAs">Investing as</label>
             <select id="f-type" name="investor_type">
-              <option>Individual</option>
-              <option>Entity / LLC</option>
-              <option>Self-directed IRA</option>
-              <option>Family office</option>
+              <option data-i18n="opt.individual">Individual</option>
+              <option data-i18n="opt.entity">Entity / LLC</option>
+              <option data-i18n="opt.ira">Self-directed IRA</option>
+              <option data-i18n="opt.family">Family office</option>
             </select>
           </div>
           <div>
-            <label for="f-size">Typical amount</label>
+            <label for="f-size" data-i18n="form.typicalAmount">Typical amount</label>
             <select id="f-size" name="ticket_size">
-              <option>Exploring</option>
+              <option data-i18n="opt.exploring">Exploring</option>
               <option>$50K – $100K</option>
               <option>$100K – $250K</option>
               <option>$250K – $500K</option>
@@ -488,15 +490,15 @@
           </div>
         </div>
         <div class="field">
-          <label for="f-note">Anything we should know <span class="dim">(optional)</span></label>
-          <textarea id="f-note" name="note" rows="3" placeholder="Experience with notes or trust deeds, questions, timing…"></textarea>
+          <label for="f-note" data-i18n="form.anything">Anything we should know <span class="dim">(optional)</span></label>
+          <textarea id="f-note" name="note" rows="3" data-i18n-ph="form.notePlaceholder" placeholder="Experience with notes or trust deeds, questions, timing…"></textarea>
         </div>
         <div class="checkline">
           <input id="f-firstlook" name="first_look" type="checkbox" value="yes" checked>
-          <label for="f-firstlook">Put me on the first-look list — I want to see each week’s file before it’s shown widely.</label>
+          <label for="f-firstlook" data-i18n="form.firstlook">Put me on the first-look list — I want to see each week’s file before it’s shown widely.</label>
         </div>
-        <button class="btn btn-primary btn-wide" type="submit">Submit request</button>
-        <p class="fineline">Submitting a request does not create an account and does not obligate you to invest.</p>
+        <button class="btn btn-primary btn-wide" type="submit" data-i18n="btn.submitRequest">Submit request</button>
+        <p class="fineline" data-i18n="access.fineline">Submitting a request does not create an account and does not obligate you to invest.</p>
       </form>
     </div>
   </section>
@@ -506,7 +508,7 @@
 <footer class="site-footer">
   <div class="shell">
     <p class="foot-mark">Private Note Capital</p>
-    <p class="disclosure">
+    <p class="disclosure" data-i18n="foot.disclosure">
       Private Note Capital is operated by West Coast Capital Mortgage Inc., a licensed California
       mortgage company (NMLS #2817729, CA DRE #01385024). Equal Housing Opportunity. It provides
       access to information about investments in promissory notes secured by real estate. Nothing on
@@ -519,7 +521,7 @@
       guarantee future results.
     </p>
     <p class="foot-line">© <span id="year">2026</span> West Coast Capital Mortgage Inc. · NMLS #2817729 · CA DRE #01385024 · <a href="tel:3106865053">(310) 686-5053</a></p>
-    <p class="foot-line">A West Coast Capital Mortgage company · Buying or refinancing a home? <a href="https://ourmtg.com" target="_blank" rel="noopener">OurMTG →</a></p>
+    <p class="foot-line" data-i18n="foot.line2">A West Coast Capital Mortgage company · Buying or refinancing a home? <a href="https://ourmtg.com" target="_blank" rel="noopener">OurMTG →</a></p>
   </div>
 </footer>
 
@@ -554,87 +556,114 @@
   }
   var set = function (id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
 
-  function boot(guidelines, deals) {
-    // ---- Live yield model (options + math from guidelines) ----
-    var amountEl = document.getElementById('c-amount');
-    var profileEl = document.getElementById('c-profile');
-    var P = {};
-    if (profileEl) {
-      profileEl.innerHTML = '';
-      guidelines.forEach(function (g, i) {
-        P[g.key] = { lien: (g.lien || 'First') + ' lien', ltv: g.maxLtv, rate: g.targetYield, term: g.termMonths, min: g.min };
-        var o = document.createElement('option');
-        o.value = g.key;
-        o.textContent = g.label + ' — 1st lien · ≤' + g.maxLtv + '% LTV · ' + pct(g.targetYield);
-        if (g.key === 'core' || (!P.core && i === 1)) o.selected = true;
-        profileEl.appendChild(o);
-      });
-    }
-    function recalc() {
-      var amt = num(amountEl.value);
-      var p = P[profileEl.value] || P[guidelines[0].key];
-      var annual = amt * (p.rate / 100), monthly = annual / 12, atTerm = annual * (p.term / 12);
-      set('o-yield', pct(p.rate));
-      set('o-monthly', money(monthly));
-      set('o-annual', money(annual));
-      set('o-term', money(atTerm));
-      set('o-terms', p.lien + ' · ≤' + p.ltv + '% LTV · interest-only · paid monthly · ' + p.term + '-month term · min ' + money(p.min));
-    }
-    if (amountEl && profileEl) {
-      amountEl.addEventListener('input', recalc);
-      profileEl.addEventListener('change', recalc);
-      amountEl.addEventListener('blur', function () { var n = num(amountEl.value); amountEl.value = n ? money(n) : ''; });
-      Array.prototype.forEach.call(document.querySelectorAll('.chips button'), function (b) {
-        b.addEventListener('click', function () { amountEl.value = money(Number(b.getAttribute('data-amt'))); recalc(); });
-      });
-      recalc();
-    }
+  // Current language + dynamic-label templates come from i18n.js (window.PNC).
+  var PNC = window.PNC || { lang: 'en', DYN: null, subscribe: function () {} };
+  function lang() { return (window.PNC && window.PNC.lang) || 'en'; }
+  var DYN = (window.PNC && window.PNC.DYN) || null;
 
-    // ---- Guidelines table (rows from guidelines) ----
+  var G = null, D = null;              // guidelines + deals, once loaded
+  var amountEl, profileEl, P = {};
+
+  // ---- Live yield model: options + math from guidelines (language-aware) ----
+  function renderCalc(L) {
+    if (!G) return;
+    amountEl = document.getElementById('c-amount');
+    profileEl = document.getElementById('c-profile');
+    if (!profileEl) return;
+    var keep = profileEl.value;
+    profileEl.innerHTML = '';
+    P = {};
+    G.forEach(function (g, i) {
+      P[g.key] = { lien: g.lien || 'First', ltv: g.maxLtv, rate: g.targetYield, term: g.termMonths, min: g.min };
+      var o = document.createElement('option');
+      o.value = g.key;
+      var label = DYN ? DYN.profileLabel(L, g) : g.label;
+      var first = DYN ? DYN.firstShort(L) : '1st lien';
+      o.textContent = label + ' — ' + first + ' · ≤' + g.maxLtv + '% LTV · ' + pct(g.targetYield);
+      if ((keep && g.key === keep) || (!keep && (g.key === 'core' || i === 1))) o.selected = true;
+      profileEl.appendChild(o);
+    });
+    recalc();
+  }
+  function recalc() {
+    if (!amountEl || !profileEl || !G) return;
+    var L = lang();
+    var p = P[profileEl.value] || P[G[0].key];
+    var amt = num(amountEl.value);
+    var annual = amt * (p.rate / 100), monthly = annual / 12, atTerm = annual * (p.term / 12);
+    set('o-yield', pct(p.rate));
+    set('o-monthly', money(monthly));
+    set('o-annual', money(annual));
+    set('o-term', money(atTerm));
+    set('o-terms', DYN ? DYN.terms(L, p, money)
+      : (p.lien + ' lien · ≤' + p.ltv + '% LTV · interest-only · paid monthly · ' + p.term + '-month term · min ' + money(p.min)));
+  }
+
+  // ---- Guidelines ledger (language-aware rows + mobile data-l labels) ----
+  function renderLedger(L) {
     var led = document.getElementById('pnc-ledger');
-    if (led) {
-      Array.prototype.forEach.call(led.querySelectorAll('.ledger-row'), function (r) { r.remove(); });
-      guidelines.forEach(function (g) {
-        var r = document.createElement('div'); r.className = 'ledger-row'; r.setAttribute('role', 'row');
-        r.innerHTML =
-          '<span role="cell" data-l="Profile"><strong>' + g.label + '</strong></span>' +
-          '<span role="cell" data-l="Lien">' + (g.lien || 'First') + '</span>' +
-          '<span role="cell" data-l="Max LTV">' + g.maxLtv + '%</span>' +
-          '<span role="cell" data-l="Target yield" class="fig">' + pct(g.targetYield) + '</span>' +
-          '<span role="cell" data-l="Term">' + g.termLabel + '</span>' +
-          '<span role="cell" data-l="Minimum">' + money(g.min) + '</span>';
-        led.appendChild(r);
-      });
-    }
+    if (!led || !G) return;
+    Array.prototype.forEach.call(led.querySelectorAll('.ledger-row'), function (r) { r.remove(); });
+    var h = DYN ? DYN.ledgerHeaders(L) : ['Profile', 'Lien', 'Max LTV', 'Target yield', 'Term', 'Minimum'];
+    G.forEach(function (g) {
+      var lienV = DYN ? DYN.lienValue(L, g.lien || 'First') : (g.lien || 'First');
+      var termV = DYN ? DYN.termLabel(L, g.termLabel) : g.termLabel;
+      var r = document.createElement('div'); r.className = 'ledger-row'; r.setAttribute('role', 'row');
+      r.innerHTML =
+        '<span role="cell" data-l="' + h[0] + '"><strong>' + (DYN ? DYN.profileLabel(L, g) : g.label) + '</strong></span>' +
+        '<span role="cell" data-l="' + h[1] + '">' + lienV + '</span>' +
+        '<span role="cell" data-l="' + h[2] + '">' + g.maxLtv + '%</span>' +
+        '<span role="cell" data-l="' + h[3] + '" class="fig">' + pct(g.targetYield) + '</span>' +
+        '<span role="cell" data-l="' + h[4] + '">' + termV + '</span>' +
+        '<span role="cell" data-l="' + h[5] + '">' + money(g.min) + '</span>';
+      led.appendChild(r);
+    });
+  }
 
-    // ---- Deal of the week (weekly rotation from deals) ----
+  // ---- Deal of the week (weekly rotation; labels localized, data as authored) ----
+  function renderDeal(L) {
     var card = document.getElementById('dealweek');
-    if (card && deals.length) {
-      var wk = isoWeek(new Date()), d = deals[wk % deals.length];
-      set('dw-no', 'FILE OF THE WEEK · PNC-' + (new Date().getFullYear()) + '-' + String(100 + (wk % 90)));
-      set('dw-type', d.type);
-      set('dw-county', d.county);
-      set('dw-amount', d.amount);
-      set('dw-ltv', d.ltv + '%');
-      set('dw-yield', Number(d.yield).toFixed(2) + '%');
-      set('dw-term', d.term + ' months · monthly servicing');
-      set('dw-note', d.note);
-      var fill = document.getElementById('dw-ltvfill');
-      if (fill) fill.style.setProperty('--ltv', d.ltv + '%');
-      card.classList.add('ltv-run');
-      set('pl-files', String(2 + (wk % 3)));
-      set('pl-seeking', '$' + (1.2 + (wk % 5) * 0.3).toFixed(1) + 'M');
-      set('pl-ltv', (59 + (wk % 7)) + '%');
-    }
+    if (!card || !D || !D.length) return;
+    var now = new Date(), wk = isoWeek(now), d = D[wk % D.length];
+    var fow = DYN ? DYN.fileOfWeek[L] || DYN.fileOfWeek.en : 'FILE OF THE WEEK';
+    set('dw-no', fow + ' · PNC-' + now.getFullYear() + '-' + String(100 + (wk % 90)));
+    set('dw-type', d.type);
+    set('dw-county', d.county);
+    set('dw-amount', d.amount);
+    set('dw-ltv', d.ltv + '%');
+    set('dw-yield', Number(d.yield).toFixed(2) + '%');
+    set('dw-term', DYN ? DYN.dwTerm(L, d.term) : (d.term + ' months · monthly servicing'));
+    set('dw-note', d.note);
+    var fill = document.getElementById('dw-ltvfill');
+    if (fill) fill.style.setProperty('--ltv', d.ltv + '%');
+    card.classList.add('ltv-run');
+    set('pl-files', String(2 + (wk % 3)));
+    set('pl-seeking', '$' + (1.2 + (wk % 5) * 0.3).toFixed(1) + 'M');
+    set('pl-ltv', (59 + (wk % 7)) + '%');
+  }
+
+  function renderAll(L) { renderCalc(L); renderLedger(L); renderDeal(L); }
+
+  function wireCalc() {
+    var a = document.getElementById('c-amount'), pf = document.getElementById('c-profile');
+    if (!a || !pf) return;
+    a.addEventListener('input', recalc);
+    pf.addEventListener('change', recalc);
+    a.addEventListener('blur', function () { var n = num(a.value); a.value = n ? money(n) : ''; });
+    Array.prototype.forEach.call(document.querySelectorAll('.chips button'), function (b) {
+      b.addEventListener('click', function () { a.value = money(Number(b.getAttribute('data-amt'))); recalc(); });
+    });
   }
 
   function grab(url) {
     return fetch(url, { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
   }
+  wireCalc();
   Promise.all([grab('data/guidelines.json'), grab('data/deals.json')]).then(function (res) {
-    var g = (res[0] && res[0].profiles && res[0].profiles.length) ? res[0].profiles : FB_GUIDELINES;
-    var d = (res[1] && res[1].deals && res[1].deals.length) ? res[1].deals : FB_DEALS;
-    boot(g, d);
+    G = (res[0] && res[0].profiles && res[0].profiles.length) ? res[0].profiles : FB_GUIDELINES;
+    D = (res[1] && res[1].deals && res[1].deals.length) ? res[1].deals : FB_DEALS;
+    renderAll(lang());
+    if (window.PNC && window.PNC.subscribe) window.PNC.subscribe(renderAll);
   });
 
   // ---- Interface-light reveals ----
