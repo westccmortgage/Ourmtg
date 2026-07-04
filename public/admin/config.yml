@@ -5,8 +5,11 @@
 # them on the next visit.
 
 backend:
-  name: git-gateway
+  name: github
+  repo: westccmortgage/Ourmtg
   branch: claude/new-branch
+  base_url: https://privatenotecapital.com
+  auth_endpoint: .netlify/functions/auth
 
 # Show a "publishing to production" flow (immediate commits).
 publish_mode: simple

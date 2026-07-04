@@ -4,6 +4,7 @@
 [build]
   command = "echo 'static site — nothing to build'"
   publish = "public"
+  functions = "netlify/functions"
 
 [[headers]]
   for = "/*"

@@ -7,9 +7,8 @@
   <title>Private Note Capital — Content admin</title>
 </head>
 <body>
-  <!-- Netlify Identity: the login layer for the CMS -->
-  <script src="https://identity.netlify.com/v1/netlify-identity-widget.js"></script>
-  <!-- Decap CMS (maintained successor to Netlify CMS) -->
+  <!-- Decap CMS (maintained successor to Netlify CMS). Auth: GitHub OAuth via the
+       site's /.netlify/functions/auth+callback (no Netlify Identity needed). -->
   <script src="https://unpkg.com/decap-cms@^3.3.3/dist/decap-cms.js"></script>
 </body>
 </html>
