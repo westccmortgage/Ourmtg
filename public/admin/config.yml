@@ -1,0 +1,58 @@
+# Decap CMS config for Private Note Capital.
+# Auth: Netlify Identity + Git Gateway (login with email; commits happen for you).
+# The site is deployed from the `claude/new-branch` branch of the Ourmtg repo, so the
+# CMS edits and commits there. Editing publishes to data/*.json → the site re-reads
+# them on the next visit.
+
+backend:
+  name: git-gateway
+  branch: claude/new-branch
+
+# Show a "publishing to production" flow (immediate commits).
+publish_mode: simple
+
+media_folder: "public/uploads"
+public_folder: "/uploads"
+
+collections:
+  - name: "content"
+    label: "Site content"
+    files:
+      # ---- Deals: the File-of-the-Week rotation ----
+      - label: "Deals — File of the Week rotation"
+        name: "deals"
+        file: "public/data/deals.json"
+        description: "Each entry is one representative opportunity. The site shows one per week, rotating in order. Keep specifics honest and non-identifying — the live file opens in the deal room."
+        fields:
+          - label: "Deals"
+            name: "deals"
+            widget: "list"
+            summary: "{{fields.type}} — {{fields.county}} ({{fields.ltv}}% LTV)"
+            fields:
+              - { label: "Type", name: "type", widget: "string", hint: "e.g. Fix & flip, Purchase bridge, Cash-out refinance" }
+              - { label: "County / location", name: "county", widget: "string" }
+              - { label: "Max LTV (%)", name: "ltv", widget: "number", value_type: "int", min: 1, max: 90 }
+              - { label: "Term (months)", name: "term", widget: "number", value_type: "int", min: 1, max: 60 }
+              - { label: "Target yield (%)", name: "yield", widget: "number", value_type: "float", step: 0.25 }
+              - { label: "Amount range", name: "amount", widget: "string", hint: "e.g. $480K – $620K" }
+              - { label: "Notes", name: "note", widget: "string", hint: "short, non-identifying — e.g. experienced operator · clear exit" }
+
+      # ---- Guidelines: the note profiles (also feed the yield calculator) ----
+      - label: "Guidelines — note profiles"
+        name: "guidelines"
+        file: "public/data/guidelines.json"
+        description: "The lending box shown in the Guidelines table and driving the yield calculator dropdown."
+        fields:
+          - label: "Profiles"
+            name: "profiles"
+            widget: "list"
+            summary: "{{fields.label}} — ≤{{fields.maxLtv}}% · {{fields.targetYield}}%"
+            fields:
+              - { label: "Key (id, lowercase, no spaces)", name: "key", widget: "string", pattern: ['^[a-z0-9_]+$', 'lowercase letters, numbers, underscore only'] }
+              - { label: "Label", name: "label", widget: "string" }
+              - { label: "Lien", name: "lien", widget: "string", default: "First" }
+              - { label: "Max LTV (%)", name: "maxLtv", widget: "number", value_type: "int", min: 1, max: 90 }
+              - { label: "Target yield (%)", name: "targetYield", widget: "number", value_type: "float", step: 0.25 }
+              - { label: "Term label (display)", name: "termLabel", widget: "string", hint: "e.g. 12 mo, 6–12 mo" }
+              - { label: "Term months (for the math)", name: "termMonths", widget: "number", value_type: "int", min: 1, max: 60 }
+              - { label: "Minimum investment ($)", name: "min", widget: "number", value_type: "int" }
