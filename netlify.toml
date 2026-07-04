@@ -1,9 +1,9 @@
-# Branch claude/new-branch — Private Note Capital static site (repo root).
-# OurMTG lives on `main`; this branch carries ONLY the PNC site so a Netlify
-# site connected here deploys it with zero configuration.
+# Branch claude/new-branch — Private Note Capital static site in public/.
+# Explicit publish dir (NOT ".") so Netlify never falls back to a stale "dist"
+# publish setting. OurMTG lives on main; this branch carries only PNC.
 [build]
   command = "echo 'static site — nothing to build'"
-  publish = "."
+  publish = "public"
 
 [[headers]]
   for = "/*"
