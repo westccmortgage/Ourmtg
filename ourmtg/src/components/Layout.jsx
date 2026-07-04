@@ -22,6 +22,10 @@ export function ComplianceFooter() {
         <p>
           <Link to="/legal/privacy">Privacy Policy</Link> · <Link to="/legal/terms">Terms of Use</Link>
         </p>
+        <p>
+          A {BRAND.company} company · Investing in real-estate-secured notes?{' '}
+          <a href="https://privatenotecapital.com" target="_blank" rel="noopener">Private Note Capital →</a>
+        </p>
         <p className="disc">
           This is not a commitment to lend. All figures are estimates and subject to change.
           Program availability, funding, and eligibility change and are subject to program guidelines.
