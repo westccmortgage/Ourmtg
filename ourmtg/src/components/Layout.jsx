@@ -3,8 +3,10 @@
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { BRAND } from '../lib/config'
+import { useT, LangSwitch } from '../lib/i18n'
 
 export function ComplianceFooter() {
+  const t = useT()
   const nmls = [
     BRAND.nmlsCompany && `Company NMLS #${BRAND.nmlsCompany}`,
     BRAND.nmlsLo && `LO NMLS #${BRAND.nmlsLo}`,
@@ -12,7 +14,7 @@ export function ComplianceFooter() {
   return (
     <footer className="footer">
       <div className="container">
-        <p className="eho">🏠 Equal Housing Opportunity · {BRAND.company}</p>
+        <p className="eho">🏠 {t('footerEho')} · {BRAND.company}</p>
         {nmls && <p>{nmls}</p>}
         <p>
           Office: <a href={`tel:${BRAND.officePhone}`}>{BRAND.officePhone}</a>
@@ -20,16 +22,13 @@ export function ComplianceFooter() {
           {BRAND.email && <> · <a href={`mailto:${BRAND.email}`}>{BRAND.email}</a></>}
         </p>
         <p>
-          <Link to="/legal/privacy">Privacy Policy</Link> · <Link to="/legal/terms">Terms of Use</Link>
+          <Link to="/legal/privacy">{t('footerPrivacy')}</Link> · <Link to="/legal/terms">{t('footerTerms')}</Link>
         </p>
         <p>
-          A {BRAND.company} company · Investing in real-estate-secured notes?{' '}
+          A {BRAND.company} company · {t('footerInvest')}{' '}
           <a href="https://privatenotecapital.com" target="_blank" rel="noopener">Private Note Capital →</a>
         </p>
-        <p className="disc">
-          This is not a commitment to lend. All figures are estimates and subject to change.
-          Program availability, funding, and eligibility change and are subject to program guidelines.
-        </p>
+        <p className="disc">{t('footerDisc')}</p>
       </div>
     </footer>
   )
@@ -38,19 +37,21 @@ export function ComplianceFooter() {
 export default function Layout() {
   const { user, signOut } = useAuth()
   const navigate = useNavigate()
+  const t = useT()
   return (
     <div className="app">
       <header className="topbar">
         <div className="container">
           <Link to="/" className="brand">our<span>mtg</span></Link>
           <nav className="topbar-actions">
+            <LangSwitch />
             {user ? (
               <>
-                <NavLink to="/portal" end>{({ isActive }) => isActive ? '● My portal' : 'My portal'}</NavLink>
-                <button className="linkbtn" onClick={async () => { await signOut(); navigate('/') }}>Sign out</button>
+                <NavLink to="/portal" end>{({ isActive }) => isActive ? `● ${t('myPortal')}` : t('myPortal')}</NavLink>
+                <button className="linkbtn" onClick={async () => { await signOut(); navigate('/') }}>{t('signOut')}</button>
               </>
             ) : (
-              <Link to="/login">Sign in</Link>
+              <Link to="/login">{t('signIn')}</Link>
             )}
           </nav>
         </div>

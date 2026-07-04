@@ -265,3 +265,15 @@ table.q tr:hover td { background: #f0ede4; cursor: pointer; }
   color: transparent; -webkit-text-stroke: 1.5px var(--stamp); opacity: .45; pointer-events: none;
 }
 input[type=range] { accent-color: var(--ink); padding: 0; border: 0; background: transparent; }
+
+/* Language switcher (EN / ES / RU) — quiet mono chips in the top bar. */
+.langswitch { display: inline-flex; align-items: center; gap: 0; border: 1.5px solid var(--soft); border-radius: 2px; overflow: hidden; }
+.langswitch .langbtn {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--muted); background: transparent; border: 0; cursor: pointer;
+  padding: 4px 8px; line-height: 1; border-left: 1px solid var(--soft);
+}
+.langswitch .langbtn:first-child { border-left: 0; }
+.langswitch .langbtn:hover { color: var(--ink); }
+.langswitch .langbtn.active { color: var(--paper); background: var(--ink); }
+@media (max-width: 520px) { .langswitch .langbtn { padding: 4px 6px; } .topbar-actions { gap: 12px; } }

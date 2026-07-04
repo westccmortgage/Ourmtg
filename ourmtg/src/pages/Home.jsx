@@ -1,12 +1,16 @@
 // Home = the 2-button front door (spec §K.1), merged-concept edition: quiet paper,
 // one oversized lowercase headline, the wire with its traveling dot, and a ledger of
-// three plain promises. No marketing fluff — the restraint IS the brand.
+// three plain promises. No marketing fluff — the restraint IS the brand. Trilingual
+// (EN / ES / RU): the owner-editable hero copy comes from site settings; the rest of
+// the fixed chrome resolves through the UI dictionary.
 import { Link } from 'react-router-dom'
 import { BRAND } from '../lib/config'
 import { useSettings } from '../lib/useSettings'
+import { useT } from '../lib/i18n'
 
 export default function Home() {
   const { home } = useSettings()
+  const t = useT()
   return (
     <>
       <section className="hero">
@@ -14,49 +18,49 @@ export default function Home() {
         <h1>{home.headline}<br /><span className="lt">{home.headlineAlt}</span></h1>
         <p className="lead">{home.sub}</p>
         <div className="cta-grid">
-          <Link to="/plan" className="btn btn-primary btn-lg">Build my file — 60 sec</Link>
-          <Link to="/realtor" className="btn btn-ghost btn-lg">I’m a Realtor</Link>
+          <Link to="/plan" className="btn btn-primary btn-lg">{t('homeCtaBuild')}</Link>
+          <Link to="/realtor" className="btn btn-ghost btn-lg">{t('homeCtaRealtor')}</Link>
         </div>
         <p style={{ marginTop: 18 }}>
-          <small>No questions, just the form? <Link to="/apply">Start an application</Link>. Already have a portal? <Link to="/login">Sign in</Link>.</small>
+          <small>{t('homeNoQ')} <Link to="/apply">{t('homeStartApp')}</Link>. {t('homeHavePortal')} <Link to="/login">{t('signIn')}</Link>.</small>
         </p>
         <div className="wire" aria-hidden="true" />
       </section>
 
       <div className="card" style={{ marginTop: 28 }}>
         <div className="row">
-          <span className="chip gray">docs</span>
+          <span className="chip gray">{t('chipDocs')}</span>
           <div className="grow">
-            <div className="rlabel">Documents that collect themselves</div>
-            <div className="rsub">A checklist for your exact loan type. Snap a photo — filed, encrypted, done.</div>
+            <div className="rlabel">{t('homeDocsT')}</div>
+            <div className="rsub">{t('homeDocsS')}</div>
           </div>
         </div>
         <div className="row">
-          <span className="chip gray">status</span>
+          <span className="chip gray">{t('chipStatus')}</span>
           <div className="grow">
-            <div className="rlabel">Status without texting anyone</div>
-            <div className="rsub">Seven stages, one moving dot. You’ll know before you think to ask.</div>
+            <div className="rlabel">{t('homeStatusT')}</div>
+            <div className="rsub">{t('homeStatusS')}</div>
           </div>
         </div>
         <div className="row">
-          <span className="chip gray">private</span>
+          <span className="chip gray">{t('chipPrivate')}</span>
           <div className="grow">
-            <div className="rlabel">Your file stays yours</div>
-            <div className="rsub">Financial documents live in a private vault — never public, never emailed around.</div>
+            <div className="rlabel">{t('homePrivateT')}</div>
+            <div className="rsub">{t('homePrivateS')}</div>
           </div>
         </div>
       </div>
 
       <div className="card">
-        <div className="card-head"><h2>Find your path</h2></div>
-        <div className="row"><div className="grow"><Link to="/dpa" className="rlabel" style={{ textDecoration: 'none' }}>Down payment assistance →</Link><div className="rsub">Check what California will help you with.</div></div></div>
-        <div className="row"><div className="grow"><Link to="/fha" className="rlabel" style={{ textDecoration: 'none' }}>FHA — first home →</Link><div className="rsub">3.5% down, friendlier credit.</div></div></div>
-        <div className="row"><div className="grow"><Link to="/va" className="rlabel" style={{ textDecoration: 'none' }}>VA — you served →</Link><div className="rsub">$0 down, no monthly mortgage insurance.</div></div></div>
-        <div className="row"><div className="grow"><Link to="/self-employed" className="rlabel" style={{ textDecoration: 'none' }}>Self-employed →</Link><div className="rsub">Qualify on bank statements, not tax returns.</div></div></div>
-        <div className="row"><div className="grow"><Link to="/jumbo" className="rlabel" style={{ textDecoration: 'none' }}>Jumbo →</Link><div className="rsub">Above county limits, done calmly.</div></div></div>
-        <div className="row"><div className="grow"><Link to="/refi" className="rlabel" style={{ textDecoration: 'none' }}>Refinance →</Link><div className="rsub">An honest answer on whether it pays.</div></div></div>
-        <div className="row"><div className="grow"><Link to="/calculator" className="rlabel" style={{ textDecoration: 'none' }}>Calculators →</Link><div className="rsub">Affordability and refi savings, no email required.</div></div></div>
-        <div className="row"><div className="grow"><Link to="/who" className="rlabel" style={{ textDecoration: 'none' }}>Who sends what? →</Link><div className="rsub">Realtor forms vs. lender forms vs. inspector forms — decoded.</div></div></div>
+        <div className="card-head"><h2>{t('findYourPath')}</h2></div>
+        <div className="row"><div className="grow"><Link to="/dpa" className="rlabel" style={{ textDecoration: 'none' }}>{t('pathDpa')}</Link><div className="rsub">{t('pathDpaS')}</div></div></div>
+        <div className="row"><div className="grow"><Link to="/fha" className="rlabel" style={{ textDecoration: 'none' }}>{t('pathFha')}</Link><div className="rsub">{t('pathFhaS')}</div></div></div>
+        <div className="row"><div className="grow"><Link to="/va" className="rlabel" style={{ textDecoration: 'none' }}>{t('pathVa')}</Link><div className="rsub">{t('pathVaS')}</div></div></div>
+        <div className="row"><div className="grow"><Link to="/self-employed" className="rlabel" style={{ textDecoration: 'none' }}>{t('pathSelf')}</Link><div className="rsub">{t('pathSelfS')}</div></div></div>
+        <div className="row"><div className="grow"><Link to="/jumbo" className="rlabel" style={{ textDecoration: 'none' }}>{t('pathJumbo')}</Link><div className="rsub">{t('pathJumboS')}</div></div></div>
+        <div className="row"><div className="grow"><Link to="/refi" className="rlabel" style={{ textDecoration: 'none' }}>{t('pathRefi')}</Link><div className="rsub">{t('pathRefiS')}</div></div></div>
+        <div className="row"><div className="grow"><Link to="/calculator" className="rlabel" style={{ textDecoration: 'none' }}>{t('pathCalc')}</Link><div className="rsub">{t('pathCalcS')}</div></div></div>
+        <div className="row"><div className="grow"><Link to="/who" className="rlabel" style={{ textDecoration: 'none' }}>{t('pathWho')}</Link><div className="rsub">{t('pathWhoS')}</div></div></div>
       </div>
     </>
   )

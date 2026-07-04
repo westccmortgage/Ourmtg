@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom'
 import { AuthProvider } from './lib/auth'
+import { LangProvider } from './lib/i18n'
 import Layout from './components/Layout'
 import RequireAuth from './components/RequireAuth'
 import Home from './pages/Home'
@@ -29,6 +30,7 @@ function NotFound() {
 
 export default function App() {
   return (
+    <LangProvider>
     <AuthProvider>
       <BrowserRouter>
         <Routes>
@@ -54,5 +56,6 @@ export default function App() {
         </Routes>
       </BrowserRouter>
     </AuthProvider>
+    </LangProvider>
   )
 }
