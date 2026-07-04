@@ -1,12 +1,42 @@
 // Generic lead-engine landing (spec §E.4). One component renders all flow pages
-// (/dpa /fha /va /self-employed /jumbo /refi) from the FLOWS config: studio hero,
-// two or three qualifiers, contact + consent, posts to lead-submit with the flow's
-// own source/tag so GRCRM routing and automations branch per flow.
+// (/dpa /fha /va /self-employed /jumbo /refi) from the FLOWS config. Each page now
+// LEADS with a plain-English explainer of the program (what it is, who it fits, the
+// honest trade-offs) and ends with the qualifier + contact form — a borrower should
+// understand the path before they’re asked to raise their hand. Posts to lead-submit
+// with the flow's own source/tag so GRCRM routing and automations branch per flow.
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { submitLead } from '../lib/api'
 import { flowLeadPayload, SMS_CONSENT_TEXT } from '../lib/leadFlows'
 import { Alert } from '../components/ui'
+
+// Render one content block from a flow section.
+function Block({ block }) {
+  if (block.p) return <p style={{ margin: '0 0 12px', color: 'var(--body)', lineHeight: 1.6 }}>{block.p}</p>
+  if (block.note) return (
+    <p style={{ margin: '10px 0 0', fontSize: 13, color: 'var(--muted)', borderLeft: '2px solid var(--soft)', paddingLeft: 12 }}>
+      {block.note}
+    </p>
+  )
+  if (block.ul) return (
+    <ul style={{ margin: '0 0 6px', paddingLeft: 18, lineHeight: 1.6, color: 'var(--body)' }}>
+      {block.ul.map((li, i) => <li key={i} style={{ margin: '0 0 7px' }}>{li}</li>)}
+    </ul>
+  )
+  if (block.rows) return (
+    <div>
+      {block.rows.map((r) => (
+        <div className="row" key={r.t}>
+          <div className="grow">
+            <div className="rlabel">{r.t}</div>
+            <div className="rsub" style={{ lineHeight: 1.55 }}>{r.d}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+  return null
+}
 
 export default function LeadFlow({ flow }) {
   const [contact, setContact] = useState({ firstName: '', lastName: '', email: '', phone: '', consent: false })
@@ -48,16 +78,31 @@ export default function LeadFlow({ flow }) {
   }
 
   return (
-    <div style={{ maxWidth: 560, margin: '8px auto' }}>
+    <div style={{ maxWidth: 620, margin: '8px auto' }}>
       <Link to="/" className="backlink">← Home</Link>
+
       <section className="hero" style={{ padding: '12px 0 4px' }}>
         <p className="eyebrow">{flow.eyebrow}</p>
         <h1>{flow.title[0]}<br /><span className="lt">{flow.title[1]}</span></h1>
         <p className="lead">{flow.sub}</p>
-        <div className="wire" aria-hidden="true" style={{ margin: '22px 0 0' }} />
+        <a href="#start" className="btn btn-primary">{flow.cta}</a>
+        <div className="wire" aria-hidden="true" style={{ margin: '26px 0 0' }} />
       </section>
 
-      <form className="card" style={{ marginTop: 24 }} onSubmit={submit}>
+      {/* Explainer — the borrower learns the program before being asked to raise a hand. */}
+      {(flow.sections || []).map((sec) => (
+        <div className="card" key={sec.h} style={{ marginTop: 20 }}>
+          <div className="card-head"><h2>{sec.h}</h2></div>
+          {sec.blocks.map((b, i) => <Block key={i} block={b} />)}
+        </div>
+      ))}
+
+      {/* The form comes last — now that the reader knows what they’re starting. */}
+      <form id="start" className="card" style={{ marginTop: 24 }} onSubmit={submit}>
+        <div className="card-head"><h2>Start here</h2></div>
+        {flow.formIntro ? (
+          <p style={{ margin: '0 0 16px', color: 'var(--body)', lineHeight: 1.6 }}>{flow.formIntro}</p>
+        ) : null}
         <Alert kind="error">{error}</Alert>
         {flow.fields.map((f) => (
           <div className="field" key={f.name}>
