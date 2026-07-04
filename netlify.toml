@@ -1,27 +1,14 @@
-# OurMTG lives in the ourmtg/ subdirectory. Netlify reads netlify.toml from the repo
-# root, so this file points the build at that subdirectory via `base`. With base set,
-# `command` runs inside ourmtg/ and `publish`/`functions` resolve relative to it
-# (→ ourmtg/dist and ourmtg/netlify/functions).
+# Branch claude/new-branch — serves the Private Note Capital static site from the
+# private-note-capital/ subdirectory. (main keeps the OurMTG config; this override
+# lives only on this branch so a Netlify site connected here deploys PNC with zero
+# UI configuration — no base directory, no build command needed.)
 [build]
-  base = "ourmtg"
-  command = "npm run build"
-  publish = "dist"
-  functions = "netlify/functions"
+  command = "echo 'static site — nothing to build'"
+  publish = "private-note-capital"
 
-[build.environment]
-  # Netlify's secrets scanner cross-matches the VALUES of env vars marked "secret"
-  # against the build output. The Supabase project URL and anon/publishable key are
-  # PUBLIC by design (they ship in every Supabase client bundle via the VITE_* vars,
-  # which hold the same values) — exclude them from scanning so their legitimate
-  # presence in dist/ doesn't fail the build. SUPABASE_SERVICE_ROLE is deliberately
-  # NOT listed: it must never appear in build output, and the scanner enforcing that
-  # is protection we want to keep.
-  SECRETS_SCAN_OMIT_KEYS = "SUPABASE_URL,SUPABASE_ANON_KEY,VITE_SUPABASE_URL,VITE_SUPABASE_ANON_KEY"
-
-# SPA history fallback: client-side routing (react-router) serves index.html for any
-# non-file, non-function path. Netlify resolves /.netlify/functions/* and real assets
-# BEFORE this catch-all, so the API and static files are never shadowed.
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
