@@ -1,0 +1,7 @@
+{
+  "profiles": [
+    { "key": "conservative", "label": "Conservative", "lien": "First", "maxLtv": 60, "targetYield": 8.5,  "termLabel": "6–12 mo",  "termMonths": 12, "min": 50000 },
+    { "key": "core",         "label": "Core",         "lien": "First", "maxLtv": 65, "targetYield": 9.5,  "termLabel": "12 mo",    "termMonths": 12, "min": 50000 },
+    { "key": "balanced",     "label": "Balanced",     "lien": "First", "maxLtv": 70, "targetYield": 10.5, "termLabel": "12–24 mo", "termMonths": 18, "min": 100000 }
+  ]
+}

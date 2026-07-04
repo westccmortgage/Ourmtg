@@ -165,7 +165,7 @@
           loosening the collateral.
         </p>
       </div>
-      <div class="ledger reveal" role="table" aria-label="Note profiles">
+      <div class="ledger reveal" id="pnc-ledger" role="table" aria-label="Note profiles">
         <div class="ledger-head" role="row">
           <span role="columnheader">Profile</span>
           <span role="columnheader">Lien</span>
@@ -525,95 +525,122 @@
 <script>
 (function () {
   document.getElementById('year').textContent = new Date().getFullYear();
-
-  // ---- Live yield model -------------------------------------------------
-  var PROFILES = {
-    conservative: { lien: 'First lien', ltv: 60, rate: 8.5, term: 12, min: 50000 },
-    core:         { lien: 'First lien', ltv: 65, rate: 9.5, term: 12, min: 50000 },
-    balanced:     { lien: 'First lien', ltv: 70, rate: 10.5, term: 18, min: 100000 }
-  };
   var usd0 = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
-  var amountEl = document.getElementById('c-amount');
-  var profileEl = document.getElementById('c-profile');
+  var money = function (n) { return usd0.format(n); };
+  var num = function (v) { var n = Number(String(v).replace(/[^0-9.]/g, '')); return isFinite(n) ? n : 0; };
+  var pct = function (n) { n = Number(n); return (n % 1 === 0 ? n.toFixed(0) : n.toFixed(2).replace(/0$/, '')) + '%'; };
 
-  function parseAmt(v) { var n = Number(String(v).replace(/[^0-9.]/g, '')); return isFinite(n) ? n : 0; }
-
-  function recalc() {
-    var amt = parseAmt(amountEl.value);
-    var p = PROFILES[profileEl.value] || PROFILES.core;
-    var annual = amt * (p.rate / 100);
-    var monthly = annual / 12;
-    var atTerm = annual * (p.term / 12);
-    document.getElementById('o-yield').textContent = p.rate.toFixed(2) + '%';
-    document.getElementById('o-monthly').textContent = usd0.format(monthly);
-    document.getElementById('o-annual').textContent = usd0.format(annual);
-    document.getElementById('o-term').textContent = usd0.format(atTerm);
-    document.getElementById('o-terms').textContent =
-      p.lien + ' · ≤' + p.ltv + '% LTV · interest-only · paid monthly · ' + p.term +
-      '-month term · min ' + usd0.format(p.min);
-  }
-  if (amountEl && profileEl) {
-    amountEl.addEventListener('input', recalc);
-    profileEl.addEventListener('change', recalc);
-    amountEl.addEventListener('blur', function () {
-      var n = parseAmt(amountEl.value);
-      amountEl.value = n ? usd0.format(n) : '';
-    });
-    Array.prototype.forEach.call(document.querySelectorAll('.chips button'), function (b) {
-      b.addEventListener('click', function () {
-        amountEl.value = usd0.format(Number(b.getAttribute('data-amt')));
-        recalc();
-      });
-    });
-    recalc();
-  }
-
-  // ---- Deal of the week — deterministic weekly rotation ----------------
-  // Representative pipeline profiles; specifics stay redacted (deal room only).
-  var DEALS = [
-    { type: 'Fix & flip',            county: 'Los Angeles County, CA', ltv: 64, term: 12, yield: 9.50,  amount: '$480K – $620K', note: 'value-add single-family · experienced operator · clear resale exit' },
-    { type: 'Purchase bridge',       county: 'Orange County, CA',      ltv: 60, term: 9,  yield: 9.00,  amount: '$700K – $900K', note: 'short-term bridge · refinance takeout identified' },
-    { type: 'Cash-out refinance',    county: 'San Diego County, CA',   ltv: 65, term: 12, yield: 9.75,  amount: '$500K – $750K', note: 'investment property · seasoned rental income' },
-    { type: 'Ground-up construction',county: 'Riverside County, CA',   ltv: 62, term: 18, yield: 10.50, amount: '$1.1M – $1.4M', note: 'infill SFR · licensed GC · permits in hand' },
-    { type: 'Rate-term refinance',   county: 'Ventura County, CA',     ltv: 58, term: 12, yield: 8.75,  amount: '$450K – $600K', note: 'first-lien takeout · strong equity position' }
+  // Fallbacks keep the site whole if data/*.json can't load. The CMS / GitHub
+  // edits data/guidelines.json + data/deals.json — these mirror their defaults.
+  var FB_GUIDELINES = [
+    { key: 'conservative', label: 'Conservative', lien: 'First', maxLtv: 60, targetYield: 8.5,  termLabel: '6–12 mo',  termMonths: 12, min: 50000 },
+    { key: 'core',         label: 'Core',         lien: 'First', maxLtv: 65, targetYield: 9.5,  termLabel: '12 mo',    termMonths: 12, min: 50000 },
+    { key: 'balanced',     label: 'Balanced',     lien: 'First', maxLtv: 70, targetYield: 10.5, termLabel: '12–24 mo', termMonths: 18, min: 100000 }
   ];
+  var FB_DEALS = [
+    { type: 'Fix & flip',             county: 'Los Angeles County, CA', ltv: 64, term: 12, yield: 9.50,  amount: '$480K – $620K', note: 'value-add single-family · experienced operator · clear resale exit' },
+    { type: 'Purchase bridge',        county: 'Orange County, CA',      ltv: 60, term: 9,  yield: 9.00,  amount: '$700K – $900K', note: 'short-term bridge · refinance takeout identified' },
+    { type: 'Cash-out refinance',     county: 'San Diego County, CA',   ltv: 65, term: 12, yield: 9.75,  amount: '$500K – $750K', note: 'investment property · seasoned rental income' },
+    { type: 'Ground-up construction', county: 'Riverside County, CA',   ltv: 62, term: 18, yield: 10.50, amount: '$1.1M – $1.4M', note: 'infill SFR · licensed GC · permits in hand' },
+    { type: 'Rate-term refinance',    county: 'Ventura County, CA',     ltv: 58, term: 12, yield: 8.75,  amount: '$450K – $600K', note: 'first-lien takeout · strong equity position' }
+  ];
+
   function isoWeek(d) {
     var t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
     var day = t.getUTCDay() || 7; t.setUTCDate(t.getUTCDate() + 4 - day);
     var ys = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
     return Math.ceil((((t - ys) / 86400000) + 1) / 7);
   }
-  (function dealOfWeek() {
-    var card = document.getElementById('dealweek');
-    if (!card) return;
-    var wk = isoWeek(new Date());
-    var d = DEALS[wk % DEALS.length];
-    var set = function (id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
-    set('dw-no', 'FILE OF THE WEEK · PNC-2026-' + String(100 + (wk % 90)));
-    set('dw-type', d.type);
-    set('dw-county', d.county);
-    set('dw-amount', d.amount);
-    set('dw-ltv', d.ltv + '%');
-    set('dw-yield', d.yield.toFixed(2) + '%');
-    set('dw-term', d.term + ' months · monthly servicing');
-    set('dw-note', d.note);
-    var fill = document.getElementById('dw-ltvfill');
-    if (fill) fill.style.setProperty('--ltv', d.ltv + '%');
-    card.classList.add('ltv-run');
-    // Aggregate pipeline, deterministic from the week (representative).
-    var files = 2 + (wk % 3);
-    set('pl-files', String(files));
-    set('pl-seeking', '$' + (1.2 + (wk % 5) * 0.3).toFixed(1) + 'M');
-    set('pl-ltv', (59 + (wk % 7)) + '%');
-  })();
+  var set = function (id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
 
-  // ---- Interface-light reveals -----------------------------------------
+  function boot(guidelines, deals) {
+    // ---- Live yield model (options + math from guidelines) ----
+    var amountEl = document.getElementById('c-amount');
+    var profileEl = document.getElementById('c-profile');
+    var P = {};
+    if (profileEl) {
+      profileEl.innerHTML = '';
+      guidelines.forEach(function (g, i) {
+        P[g.key] = { lien: (g.lien || 'First') + ' lien', ltv: g.maxLtv, rate: g.targetYield, term: g.termMonths, min: g.min };
+        var o = document.createElement('option');
+        o.value = g.key;
+        o.textContent = g.label + ' — 1st lien · ≤' + g.maxLtv + '% LTV · ' + pct(g.targetYield);
+        if (g.key === 'core' || (!P.core && i === 1)) o.selected = true;
+        profileEl.appendChild(o);
+      });
+    }
+    function recalc() {
+      var amt = num(amountEl.value);
+      var p = P[profileEl.value] || P[guidelines[0].key];
+      var annual = amt * (p.rate / 100), monthly = annual / 12, atTerm = annual * (p.term / 12);
+      set('o-yield', pct(p.rate));
+      set('o-monthly', money(monthly));
+      set('o-annual', money(annual));
+      set('o-term', money(atTerm));
+      set('o-terms', p.lien + ' · ≤' + p.ltv + '% LTV · interest-only · paid monthly · ' + p.term + '-month term · min ' + money(p.min));
+    }
+    if (amountEl && profileEl) {
+      amountEl.addEventListener('input', recalc);
+      profileEl.addEventListener('change', recalc);
+      amountEl.addEventListener('blur', function () { var n = num(amountEl.value); amountEl.value = n ? money(n) : ''; });
+      Array.prototype.forEach.call(document.querySelectorAll('.chips button'), function (b) {
+        b.addEventListener('click', function () { amountEl.value = money(Number(b.getAttribute('data-amt'))); recalc(); });
+      });
+      recalc();
+    }
+
+    // ---- Guidelines table (rows from guidelines) ----
+    var led = document.getElementById('pnc-ledger');
+    if (led) {
+      Array.prototype.forEach.call(led.querySelectorAll('.ledger-row'), function (r) { r.remove(); });
+      guidelines.forEach(function (g) {
+        var r = document.createElement('div'); r.className = 'ledger-row'; r.setAttribute('role', 'row');
+        r.innerHTML =
+          '<span role="cell" data-l="Profile"><strong>' + g.label + '</strong></span>' +
+          '<span role="cell" data-l="Lien">' + (g.lien || 'First') + '</span>' +
+          '<span role="cell" data-l="Max LTV">' + g.maxLtv + '%</span>' +
+          '<span role="cell" data-l="Target yield" class="fig">' + pct(g.targetYield) + '</span>' +
+          '<span role="cell" data-l="Term">' + g.termLabel + '</span>' +
+          '<span role="cell" data-l="Minimum">' + money(g.min) + '</span>';
+        led.appendChild(r);
+      });
+    }
+
+    // ---- Deal of the week (weekly rotation from deals) ----
+    var card = document.getElementById('dealweek');
+    if (card && deals.length) {
+      var wk = isoWeek(new Date()), d = deals[wk % deals.length];
+      set('dw-no', 'FILE OF THE WEEK · PNC-' + (new Date().getFullYear()) + '-' + String(100 + (wk % 90)));
+      set('dw-type', d.type);
+      set('dw-county', d.county);
+      set('dw-amount', d.amount);
+      set('dw-ltv', d.ltv + '%');
+      set('dw-yield', Number(d.yield).toFixed(2) + '%');
+      set('dw-term', d.term + ' months · monthly servicing');
+      set('dw-note', d.note);
+      var fill = document.getElementById('dw-ltvfill');
+      if (fill) fill.style.setProperty('--ltv', d.ltv + '%');
+      card.classList.add('ltv-run');
+      set('pl-files', String(2 + (wk % 3)));
+      set('pl-seeking', '$' + (1.2 + (wk % 5) * 0.3).toFixed(1) + 'M');
+      set('pl-ltv', (59 + (wk % 7)) + '%');
+    }
+  }
+
+  function grab(url) {
+    return fetch(url, { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
+  }
+  Promise.all([grab('data/guidelines.json'), grab('data/deals.json')]).then(function (res) {
+    var g = (res[0] && res[0].profiles && res[0].profiles.length) ? res[0].profiles : FB_GUIDELINES;
+    var d = (res[1] && res[1].deals && res[1].deals.length) ? res[1].deals : FB_DEALS;
+    boot(g, d);
+  });
+
+  // ---- Interface-light reveals ----
   var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   if (reduced) { document.documentElement.classList.add('no-motion'); return; }
   var io = new IntersectionObserver(function (entries) {
-    entries.forEach(function (e) {
-      if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
-    });
+    entries.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
   }, { threshold: 0.14 });
   document.querySelectorAll('.reveal').forEach(function (el) { io.observe(el); });
 })();
