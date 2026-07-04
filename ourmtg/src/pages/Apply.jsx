@@ -5,12 +5,14 @@
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { submitLead } from '../lib/api'
-import { borrowerLeadPayload, LOAN_TYPES, PURPOSES, SMS_CONSENT_TEXT } from '../lib/leadFlows'
+import { borrowerLeadPayload, PURPOSES, SMS_CONSENT_TEXT } from '../lib/leadFlows'
+import { useSettings } from '../lib/useSettings'
 import { Alert } from '../components/ui'
 
 const EMPTY = { firstName: '', lastName: '', email: '', phone: '', loanType: 'Conventional', purpose: 'Purchase', message: '', consent: false }
 
 export default function Apply() {
+  const { loanTypes } = useSettings()
   const [params] = useSearchParams()
   const [form, setForm] = useState(EMPTY)
   const [done, setDone] = useState(false)
@@ -81,7 +83,7 @@ export default function Apply() {
           <div className="field">
             <label htmlFor="lt">Loan type</label>
             <select id="lt" value={form.loanType} onChange={set('loanType')}>
-              {LOAN_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              {loanTypes.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
           <div className="field">

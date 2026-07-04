@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { submitLead } from '../lib/api'
 import { SMS_CONSENT_TEXT } from '../lib/leadFlows'
+import { useSettings } from '../lib/useSettings'
 import { money } from '../lib/format'
 import { Alert } from '../components/ui'
 
@@ -70,12 +71,12 @@ function payFactor(rate = 7, years = 30) {
   const r = rate / 100 / 12, n = years * 12
   return r / (1 - Math.pow(1 + r, -n))
 }
-const BASE_RATE = 7 // today's typical 30-yr par used as the anchor; shown, never hidden
+const DEFAULT_RATE = 7 // fallback 30-yr par if the owner-set live rate isn't loaded
 const DOWN_PCT = { none: 0.035, 3: 0.04, 10: 0.075, 20: 0.15, '20p': 0.25 }
 const TARGET_VAL = { 500: 500000, 750: 750000, 1000: 1000000, 1500: 1500000, 2000: 2000000, 3000: 3000000 }
 const TI_MONTHLY = 0.016 / 12 // rough CA taxes + insurance, per month, on price
 
-function buildFile(a) {
+function buildFile(a, baseRate = DEFAULT_RATE) {
   const buying = ['first', 'next', 'invest'].includes(a.goal)
   const rent = Number(a.housing) || 0
   const target = TARGET_VAL[a.target] || null
@@ -88,7 +89,7 @@ function buildFile(a) {
     downPct = DOWN_PCT[a.down] ?? 0.05
     downAmt = target * downPct
     const loan = target - downAmt
-    monthly = loan * payFactor(7) + target * TI_MONTHLY
+    monthly = loan * payFactor(baseRate) + target * TI_MONTHLY
   }
   // Draft letter prints the AMBITION — their target.
   const letterMax = buying ? target : null
@@ -161,6 +162,8 @@ function RentClock({ rent }) {
 
 // ── the page ──────────────────────────────────────────────────────────────────
 export default function BuildFile() {
+  const settings = useSettings()
+  const baseRate = Number(settings.rate) || DEFAULT_RATE
   const [step, setStep] = useState(0)
   const [answers, setAnswers] = useState({})
   const [textVal, setTextVal] = useState('')
@@ -170,8 +173,11 @@ export default function BuildFile() {
   const [activated, setActivated] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  // plan-card rate explorer (the payment is honest about its rate — and adjustable)
-  const [rateSel, setRateSel] = useState(BASE_RATE)
+  // plan-card rate explorer (the payment is honest about its rate — and adjustable).
+  // Anchors on the owner-set live rate; syncs to it until the user moves the slider.
+  const [rateSel, setRateSel] = useState(DEFAULT_RATE)
+  const rateTouched = useRef(false)
+  useEffect(() => { if (!rateTouched.current) setRateSel(baseRate) }, [baseRate])
   // rate alarm
   const [alarmRate, setAlarmRate] = useState(6.25)
   const [alarmEmail, setAlarmEmail] = useState('')
@@ -179,7 +185,7 @@ export default function BuildFile() {
 
   const total = QUESTIONS.length
   const doneAsking = step >= total
-  const file = useMemo(() => (doneAsking ? buildFile(answers) : null), [doneAsking, answers])
+  const file = useMemo(() => (doneAsking ? buildFile(answers, baseRate) : null), [doneAsking, answers, baseRate])
 
   function answer(key, value) {
     setAnswers((a) => ({ ...a, [key]: value }))
@@ -204,7 +210,7 @@ export default function BuildFile() {
         const loan = file.target - file.downAmt
         const mAt = loan * payFactor(rateSel) + file.target * TI_MONTHLY
         lines.push(`TARGET PRICE: ${money(file.target)} · down ~${money(file.downAmt)} (${Math.round((file.downPct || 0) * 100)}%) · est monthly ~${money(mAt)} at ${rateSel.toFixed(3)}%`)
-        if (rateSel < BASE_RATE) lines.push(`Explored a buydown to ${rateSel.toFixed(3)}% (~${(((BASE_RATE - rateSel) / 0.25)).toFixed(1)} pts) — price it for real`)
+        if (rateSel < baseRate) lines.push(`Explored a buydown to ${rateSel.toFixed(3)}% (~${(((baseRate - rateSel) / 0.25)).toFixed(1)} pts) — price it for real`)
       }
       lines.push(`Programs: ${file.programs.map(([p]) => p).join('; ')}`)
       lines.push(`Route: ~${file.months} months to keys`)
@@ -307,7 +313,7 @@ export default function BuildFile() {
       {file.buying && file.target && file.monthly && (() => {
         const loan = file.target - file.downAmt
         const monthlyAt = loan * payFactor(rateSel) + file.target * TI_MONTHLY
-        const pts = rateSel < BASE_RATE ? (BASE_RATE - rateSel) / 0.25 : 0
+        const pts = rateSel < baseRate ? (baseRate - rateSel) / 0.25 : 0
         const ptsCost = loan * 0.01 * pts
         const closeLow = file.target * 0.02, closeHigh = file.target * 0.03
         return (
@@ -321,11 +327,11 @@ export default function BuildFile() {
 
             <div className="field" style={{ margin: '16px 0 4px' }}>
               <label htmlFor="pl-rate">At rate: <strong>{rateSel.toFixed(3)}%</strong> — slide to see it move</label>
-              <input id="pl-rate" type="range" min="5.875" max="7.625" step="0.125" value={rateSel}
-                onChange={(e) => setRateSel(Number(e.target.value))} />
+              <input id="pl-rate" type="range" min={(baseRate - 1.125).toFixed(3)} max={(baseRate + 0.625).toFixed(3)} step="0.125" value={rateSel}
+                onChange={(e) => { rateTouched.current = true; setRateSel(Number(e.target.value)) }} />
               <p className="hint" style={{ marginTop: 2 }}>
                 {pts > 0
-                  ? <>Getting {rateSel.toFixed(3)}% ≈ <strong>{money(ptsCost)}</strong> in points ({pts.toFixed(1)} pt), paid at closing — saves <strong>{money(loan * (payFactor(BASE_RATE) - payFactor(rateSel)))}</strong>/mo.</>
+                  ? <>Getting {rateSel.toFixed(3)}% ≈ <strong>{money(ptsCost)}</strong> in points ({pts.toFixed(1)} pt), paid at closing — saves <strong>{money(loan * (payFactor(baseRate) - payFactor(rateSel)))}</strong>/mo.</>
                   : <>That’s today’s typical par rate — no points needed.</>}
                 {' '}Your personal rate depends on credit, program and the day — activation gets you the real quote.
               </p>

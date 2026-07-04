@@ -90,6 +90,10 @@ export const teamAdd = (email, role) =>
 export const teamRemove = (memberUserId) =>
   call('portal-team-set', { method: 'POST', body: { action: 'remove', memberUserId } })
 
+// Site settings (owner/admin) — live rate, loan programs, home marketing.
+export const saveSettings = (data) =>
+  call('portal-settings-set', { method: 'POST', body: { data } })
+
 // ── Direct RLS reads the gateway doesn't expose (borrower/co-borrower only) ───
 // portal_access is readable by the user (own-grants RLS policy) — this is how the app
 // discovers which loan files to show and at what visibility.

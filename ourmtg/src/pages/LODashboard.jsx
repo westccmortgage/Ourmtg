@@ -3,7 +3,8 @@
 // pending-review / open-condition counts and the single next action. Row → file detail.
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { teamList, teamAdd, teamRemove } from '../lib/api'
+import { teamList, teamAdd, teamRemove, saveSettings } from '../lib/api'
+import { fetchSettings } from '../lib/useSettings'
 import { money, shortDate, relTime } from '../lib/format'
 import { STAGE_LABEL, STAGE_STEPS } from '../lib/pipeline'
 import { Alert, Empty } from '../components/ui'
@@ -95,7 +96,82 @@ export default function LODashboard({ files }) {
       </div>
 
       <TeamCard />
+      <SiteSettingsCard />
     </>
+  )
+}
+
+// Site settings: the owner edits the live rate, loan programs, and home marketing
+// copy here — the same values the public calculator, /plan builder, intake dropdowns
+// and home hero read. Saved to site_settings via portal-settings-set (owner-gated).
+function SiteSettingsCard() {
+  const [form, setForm] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    fetchSettings(true).then((s) => setForm({
+      rate: String(s.rate),
+      loanTypes: (s.loanTypes || []).join(', '),
+      headline: s.home.headline,
+      headlineAlt: s.home.headlineAlt,
+      sub: s.home.sub,
+    })).catch(() => setForm({ rate: '7', loanTypes: '', headline: '', headlineAlt: '', sub: '' }))
+  }, [])
+
+  if (!form) return null
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
+
+  async function save(e) {
+    e.preventDefault()
+    setBusy(true); setMsg(''); setError('')
+    try {
+      const r = await saveSettings({
+        rate: Number(form.rate),
+        loanTypes: form.loanTypes.split(',').map((s) => s.trim()).filter(Boolean),
+        home: { headline: form.headline, headlineAlt: form.headlineAlt, sub: form.sub },
+      })
+      setMsg(`Saved. Live rate is now ${r.data.rate}%.`)
+    } catch (err) {
+      setError(err?.message || 'Could not save settings.')
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="card">
+      <div className="card-head"><h2>Site settings</h2><span className="chip gray">owner</span></div>
+      <p className="muted mt0">Edits the public site — the calculator &amp; “Build my file” rate, the loan programs in dropdowns, and the home headline. Changes go live on the next visit; no deploy needed.</p>
+      {msg && <Alert kind="ok">{msg}</Alert>}
+      <Alert kind="error">{error}</Alert>
+      <form onSubmit={save}>
+        <div className="grid2">
+          <div className="field">
+            <label htmlFor="s-rate">Live rate % (calculator anchor)</label>
+            <input id="s-rate" type="number" step="0.125" min="0" max="25" value={form.rate} onChange={set('rate')} />
+          </div>
+          <div className="field">
+            <label htmlFor="s-types">Loan programs (comma-separated)</label>
+            <input id="s-types" value={form.loanTypes} onChange={set('loanTypes')} placeholder="Conventional, FHA, VA…" />
+          </div>
+        </div>
+        <div className="grid2">
+          <div className="field">
+            <label htmlFor="s-h1">Home headline (line 1)</label>
+            <input id="s-h1" value={form.headline} onChange={set('headline')} maxLength={120} />
+          </div>
+          <div className="field">
+            <label htmlFor="s-h2">Home headline (line 2)</label>
+            <input id="s-h2" value={form.headlineAlt} onChange={set('headlineAlt')} maxLength={120} />
+          </div>
+        </div>
+        <div className="field">
+          <label htmlFor="s-sub">Home subheadline</label>
+          <textarea id="s-sub" value={form.sub} onChange={set('sub')} maxLength={600} />
+        </div>
+        <button className="btn btn-primary btn-sm" disabled={busy}>{busy ? 'Saving…' : 'Save site settings'}</button>
+      </form>
+    </div>
   )
 }
 

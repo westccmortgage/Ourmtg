@@ -4,10 +4,12 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { setLoanFile } from '../lib/api'
-import { LOAN_TYPES, PURPOSES } from '../lib/leadFlows'
+import { PURPOSES } from '../lib/leadFlows'
+import { useSettings } from '../lib/useSettings'
 import { Alert } from '../components/ui'
 
 export default function NewLoanFile() {
+  const { loanTypes } = useSettings()
   const navigate = useNavigate()
   const [form, setForm] = useState({
     borrowerName: '', loanType: 'Conventional', purpose: 'Purchase',
@@ -51,7 +53,7 @@ export default function NewLoanFile() {
           <div className="field">
             <label htmlFor="nlt">Loan type</label>
             <select id="nlt" value={form.loanType} onChange={set('loanType')}>
-              {LOAN_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              {loanTypes.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
           <div className="field">

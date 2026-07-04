@@ -3,18 +3,16 @@
 // three plain promises. No marketing fluff — the restraint IS the brand.
 import { Link } from 'react-router-dom'
 import { BRAND } from '../lib/config'
+import { useSettings } from '../lib/useSettings'
 
 export default function Home() {
+  const { home } = useSettings()
   return (
     <>
       <section className="hero">
         <p className="eyebrow">{BRAND.company} · NMLS #{BRAND.nmlsCompany} · California</p>
-        <h1>the mortgage,<br /><span className="lt">minus the noise.</span></h1>
-        <p className="lead">
-          One secure link: upload documents from your phone, watch your loan move
-          stage by stage, and always know what’s next — without a single
-          “just checking in” call.
-        </p>
+        <h1>{home.headline}<br /><span className="lt">{home.headlineAlt}</span></h1>
+        <p className="lead">{home.sub}</p>
         <div className="cta-grid">
           <Link to="/plan" className="btn btn-primary btn-lg">Build my file — 60 sec</Link>
           <Link to="/realtor" className="btn btn-ghost btn-lg">I’m a Realtor</Link>

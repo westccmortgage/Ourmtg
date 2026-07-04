@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { submitLead } from '../lib/api'
 import { SMS_CONSENT_TEXT } from '../lib/leadFlows'
+import { useSettings } from '../lib/useSettings'
 import { money } from '../lib/format'
 import { Alert } from '../components/ui'
 
@@ -58,12 +59,16 @@ function Out({ label, value, accent }) {
 }
 
 export default function Calculator() {
+  const settings = useSettings()
   // Affordability
   const [income, setIncome] = useState('120000')
   const [debts, setDebts] = useState('600')
   const [down, setDown] = useState('60000')
-  const [rate, setRate] = useState('7')
-  const afford = useAfford(income, debts, down, rate)
+  const [rate, setRate] = useState('')
+  // Seed the rate from the owner-set live rate once settings load (until the user types).
+  const [rateTouched, setRateTouched] = useState(false)
+  const effRate = rate === '' && !rateTouched ? String(settings.rate) : rate
+  const afford = useAfford(income, debts, down, effRate)
   // Refi
   const [balance, setBalance] = useState('520000')
   const [oldRate, setOldRate] = useState('7.5')
@@ -121,7 +126,7 @@ export default function Calculator() {
         </div>
         <div className="grid2">
           <div className="field"><label>Down payment</label><input value={down} onChange={(e) => setDown(e.target.value)} inputMode="numeric" /></div>
-          <div className="field"><label>Rate %</label><input value={rate} onChange={(e) => setRate(e.target.value)} inputMode="decimal" /></div>
+          <div className="field"><label>Rate %</label><input value={effRate} onChange={(e) => { setRateTouched(true); setRate(e.target.value) }} inputMode="decimal" /></div>
         </div>
         {afford ? (
           <div className="metrics" style={{ marginTop: 6 }}>
