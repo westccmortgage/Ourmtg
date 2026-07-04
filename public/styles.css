@@ -360,3 +360,118 @@ section { padding: 76px 0; }
   .nf-row { grid-template-columns: 90px 1fr; }
   .header-row { gap: 14px; }
 }
+
+/* ============================================================
+   v2 — investor edition: yield model, decode, ledger, glossary
+   ============================================================ */
+
+/* Section rhythm: alternating grounds, ink top rules */
+.secured { border-top: 1.5px solid var(--ink); }
+.guidelines { border-top: 1.5px solid var(--ink); background: var(--paper-deep); }
+.default { border-top: 1.5px solid var(--ink); }
+.terms { border-top: 1.5px solid var(--ink); background: var(--paper-deep); }
+.working { border-top: 1.5px solid var(--ink); }
+
+/* ---- Yield model (hero right column) ---- */
+.calc {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--ink);
+  border-radius: var(--radius);
+}
+.calc-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 13px 18px; border-bottom: 1px solid var(--ink);
+}
+.calc-body { padding: 18px; }
+.calc .field { margin-bottom: 16px; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.chips button {
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em;
+  border: 1px solid var(--ink); background: var(--panel); color: var(--ink);
+  border-radius: 3px; padding: 7px 12px; cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.chips button:hover { background: var(--ink); color: var(--paper); }
+
+.calc-out { border: 1.5px solid var(--ink); border-radius: var(--radius); padding: 16px 16px 14px; margin: 4px 0 16px; background: var(--paper); }
+.calc-yield { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding-bottom: 12px; border-bottom: 1px dashed var(--soft); }
+.calc-yield .lbl { font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.calc-yield .big { font-family: var(--disp); font-size: 40px; line-height: 1; color: var(--verified); }
+.calc-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 14px 0 4px; }
+.calc-metrics .lbl { display: block; font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+.calc-metrics .v { font-family: var(--disp); font-size: 20px; letter-spacing: 0.01em; color: var(--ink); }
+.calc-terms { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.04em; color: var(--muted); margin-top: 12px; line-height: 1.6; }
+
+/* ---- Decode rows (how it's secured / risk steps) ---- */
+.decode, .default-steps { display: grid; gap: 0; }
+.decode-row {
+  display: grid; grid-template-columns: 60px 1fr; gap: 20px; align-items: baseline;
+  padding: 22px 0; border-top: 1px dashed var(--soft);
+}
+.decode-row:first-child { border-top: 0; }
+.decode-no { font-family: var(--disp); font-size: 26px; color: var(--ink); }
+.decode-body h3 { font-size: 18px; letter-spacing: -0.01em; margin-bottom: 8px; }
+.decode-body p { color: var(--muted); font-size: 15px; max-width: 62ch; }
+
+/* ---- Ledger table (guidelines) ---- */
+.ledger { border: 1px solid var(--ink); border-radius: var(--radius); overflow: hidden; background: var(--panel); }
+.ledger-head, .ledger-row {
+  display: grid;
+  grid-template-columns: 1.3fr 0.8fr 0.8fr 1fr 1fr 1fr;
+  gap: 12px; align-items: center;
+  padding: 13px 18px;
+}
+.ledger-head {
+  background: var(--ink); color: var(--paper);
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase;
+}
+.ledger-row { border-top: 1px dashed var(--soft); font-size: 14px; }
+.ledger-row:first-of-type { border-top: 0; }
+.ledger-row .fig { font-family: var(--disp); font-size: 19px; color: var(--verified); }
+.ledger-row span[data-l] strong { font-weight: 700; }
+
+/* ---- Glossary ---- */
+.glossary { display: grid; grid-template-columns: 1fr 1fr; gap: 0 40px; border-top: 1.5px solid var(--ink); }
+.gl { padding: 16px 0; border-bottom: 1px dashed var(--soft); }
+.gl dt { font-weight: 700; font-size: 15px; letter-spacing: -0.01em; margin-bottom: 4px; }
+.gl dt::before { content: '— '; color: var(--muted); }
+.gl dd { color: var(--muted); font-size: 14px; }
+
+/* ---- Default (risk) section ---- */
+.default-grid { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 52px; align-items: start; }
+.default .section-head { margin-bottom: 0; }
+.default-steps { list-style: none; counter-reset: d; }
+.default-steps li {
+  position: relative; padding: 16px 0 16px 40px; border-top: 1px dashed var(--soft);
+  font-size: 15px; color: var(--muted);
+}
+.default-steps li:first-child { border-top: 0; }
+.default-steps li strong { color: var(--ink); font-weight: 600; }
+.default-steps li::before {
+  counter-increment: d; content: counter(d);
+  position: absolute; left: 0; top: 15px;
+  font-family: var(--disp); font-size: 20px; color: var(--ink); line-height: 1;
+}
+
+/* ---- Access form: two-up selects ---- */
+.field.two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.field.two > div { display: grid; gap: 6px; }
+
+/* ---- Responsive ---- */
+@media (max-width: 760px) {
+  .calc-metrics { grid-template-columns: 1fr 1fr 1fr; }
+  .ledger-head { display: none; }
+  .ledger-row {
+    grid-template-columns: 1fr 1fr; gap: 8px 14px; padding: 16px 16px;
+  }
+  .ledger-row span[data-l]::before {
+    content: attr(data-l); display: block;
+    font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 2px;
+  }
+  .glossary { grid-template-columns: 1fr; }
+  .default-grid { grid-template-columns: 1fr; gap: 32px; }
+  .field.two { grid-template-columns: 1fr; }
+  .decode-row { grid-template-columns: 44px 1fr; gap: 14px; }
+}
