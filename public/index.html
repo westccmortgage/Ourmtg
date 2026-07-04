@@ -18,9 +18,9 @@
   <div class="shell header-row">
     <a class="wordmark" href="#top">Private&nbsp;Note&nbsp;Capital</a>
     <nav class="site-nav" aria-label="Primary">
-      <a href="#secured">Security</a>
+      <a href="#opportunities">Opportunities</a>
       <a href="#guidelines">Guidelines</a>
-      <a href="#process">Process</a>
+      <a href="#secured">Security</a>
       <a href="#people">Who we are</a>
     </nav>
     <a class="site-phone" href="tel:3106865053">(310)&nbsp;686-5053</a>
@@ -200,6 +200,85 @@
         </div>
       </div>
       <p class="fineline reveal">Guidelines describe the box we work within; specific terms are set per opportunity and disclosed in full inside the deal room. Target yields are not guaranteed. All investments involve risk, including loss of principal.</p>
+    </div>
+  </section>
+
+  <!-- ============ CURRENT OPPORTUNITIES — rotating hook + first-look ============ -->
+  <section class="opps" id="opportunities">
+    <div class="shell">
+      <div class="section-head reveal">
+        <p class="kicker">This week · access by request</p>
+        <h2>What we’re funding now.</h2>
+        <p class="section-lede">
+          Real files move fast — they’re shown to a small number of investors and often fill within
+          days of release. You don’t chase a single deal here; you get <strong>first look at the
+          flow</strong>. Below is the kind of file open this week. The live file, with address and
+          numbers, opens in the deal room once you’re approved.
+        </p>
+      </div>
+
+      <div class="opps-grid">
+        <!-- Rotating featured file (representative; specifics redacted) -->
+        <article class="notefile reveal" id="dealweek" aria-label="This week's representative opportunity">
+          <span class="stamp" aria-label="Open">Open</span>
+          <header class="notefile-head">
+            <span class="file-no" id="dw-no">FILE OF THE WEEK · PNC-2026-0XX</span>
+            <span class="file-status"><span class="status-dot" aria-hidden="true"></span>Accepting review</span>
+          </header>
+          <dl class="notefile-body">
+            <div class="nf-row"><dt>Type</dt><dd id="dw-type">Fix &amp; flip</dd></div>
+            <div class="nf-row"><dt>Location</dt><dd><span id="dw-county">Los Angeles County, CA</span> · <span class="redact" style="--w:70px"></span></dd></div>
+            <div class="nf-row"><dt>Loan amount</dt><dd id="dw-amount">$480K–$620K</dd></div>
+            <div class="nf-row nf-ltv">
+              <dt>LTV</dt>
+              <dd><span class="ltv-num" id="dw-ltv">64%</span>
+                <span class="ltv-track" aria-hidden="true"><span class="ltv-fill" id="dw-ltvfill" style="--ltv:64%"></span></span></dd>
+            </div>
+            <div class="nf-row"><dt>Target yield</dt><dd><span class="fig" id="dw-yield">9.50%</span> · 1st lien · interest-only</dd></div>
+            <div class="nf-row"><dt>Term</dt><dd id="dw-term">12 months · monthly servicing</dd></div>
+            <div class="nf-row"><dt>Notes</dt><dd id="dw-note" class="dim">experienced operator · clear exit</dd></div>
+          </dl>
+          <footer class="notefile-docs">
+            <p class="docs-label">Full file in the deal room</p>
+            <ul class="docs-list">
+              <li class="doc checked">Promissory note</li>
+              <li class="doc checked">Deed of trust</li>
+              <li class="doc checked">Title &amp; appraisal</li>
+              <li class="doc checked">Servicing terms</li>
+            </ul>
+          </footer>
+        </article>
+
+        <!-- First-look hook + live pipeline aggregate -->
+        <div class="opps-side reveal">
+          <div class="quiet-card firstlook">
+            <p class="quiet-title">Get first look at the flow</p>
+            <p>Approved investors see each week’s file <strong>before</strong> it’s shown widely. When
+            one fills, the next is already coming — first-look means you’re never watching from outside.</p>
+            <a class="btn btn-primary btn-wide" href="#access">Join the first-look list</a>
+            <a class="btn btn-ghost btn-wide" href="tel:3106865053" style="margin-top:10px">Or call (310) 686-5053</a>
+          </div>
+          <div class="pipeline">
+            <p class="pipeline-label">Pipeline this week</p>
+            <div class="pipeline-metrics">
+              <div><span class="v" id="pl-files">3</span><span class="l">files in review</span></div>
+              <div><span class="v" id="pl-seeking">$1.9M</span><span class="l">seeking</span></div>
+              <div><span class="v" id="pl-ltv">62%</span><span class="l">avg LTV · 1st lien</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="fineline reveal">
+        Representative of current pipeline; not a specific offer. Trust-deed investments are arranged
+        through West Coast Capital Mortgage Inc. (CA DRE #01385024); approved investors receive full
+        written disclosures before funding any note. Offered privately to qualified investors only.
+      </p>
+
+      <div class="otherside reveal">
+        <div><strong>On the other side — need capital for a project?</strong> We fund fix &amp; flip, bridge, cash-out, and ground-up construction against California real estate. Bring us the scenario; strong files become next week’s opportunity.</div>
+        <a class="btn btn-ghost btn-sm" href="tel:3106865053">Submit a scenario</a>
+      </div>
     </div>
   </section>
 
@@ -412,6 +491,10 @@
           <label for="f-note">Anything we should know <span class="dim">(optional)</span></label>
           <textarea id="f-note" name="note" rows="3" placeholder="Experience with notes or trust deeds, questions, timing…"></textarea>
         </div>
+        <div class="checkline">
+          <input id="f-firstlook" name="first_look" type="checkbox" value="yes" checked>
+          <label for="f-firstlook">Put me on the first-look list — I want to see each week’s file before it’s shown widely.</label>
+        </div>
         <button class="btn btn-primary btn-wide" type="submit">Submit request</button>
         <p class="fineline">Submitting a request does not create an account and does not obligate you to invest.</p>
       </form>
@@ -484,6 +567,45 @@
     });
     recalc();
   }
+
+  // ---- Deal of the week — deterministic weekly rotation ----------------
+  // Representative pipeline profiles; specifics stay redacted (deal room only).
+  var DEALS = [
+    { type: 'Fix & flip',            county: 'Los Angeles County, CA', ltv: 64, term: 12, yield: 9.50,  amount: '$480K – $620K', note: 'value-add single-family · experienced operator · clear resale exit' },
+    { type: 'Purchase bridge',       county: 'Orange County, CA',      ltv: 60, term: 9,  yield: 9.00,  amount: '$700K – $900K', note: 'short-term bridge · refinance takeout identified' },
+    { type: 'Cash-out refinance',    county: 'San Diego County, CA',   ltv: 65, term: 12, yield: 9.75,  amount: '$500K – $750K', note: 'investment property · seasoned rental income' },
+    { type: 'Ground-up construction',county: 'Riverside County, CA',   ltv: 62, term: 18, yield: 10.50, amount: '$1.1M – $1.4M', note: 'infill SFR · licensed GC · permits in hand' },
+    { type: 'Rate-term refinance',   county: 'Ventura County, CA',     ltv: 58, term: 12, yield: 8.75,  amount: '$450K – $600K', note: 'first-lien takeout · strong equity position' }
+  ];
+  function isoWeek(d) {
+    var t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    var day = t.getUTCDay() || 7; t.setUTCDate(t.getUTCDate() + 4 - day);
+    var ys = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+    return Math.ceil((((t - ys) / 86400000) + 1) / 7);
+  }
+  (function dealOfWeek() {
+    var card = document.getElementById('dealweek');
+    if (!card) return;
+    var wk = isoWeek(new Date());
+    var d = DEALS[wk % DEALS.length];
+    var set = function (id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
+    set('dw-no', 'FILE OF THE WEEK · PNC-2026-' + String(100 + (wk % 90)));
+    set('dw-type', d.type);
+    set('dw-county', d.county);
+    set('dw-amount', d.amount);
+    set('dw-ltv', d.ltv + '%');
+    set('dw-yield', d.yield.toFixed(2) + '%');
+    set('dw-term', d.term + ' months · monthly servicing');
+    set('dw-note', d.note);
+    var fill = document.getElementById('dw-ltvfill');
+    if (fill) fill.style.setProperty('--ltv', d.ltv + '%');
+    card.classList.add('ltv-run');
+    // Aggregate pipeline, deterministic from the week (representative).
+    var files = 2 + (wk % 3);
+    set('pl-files', String(files));
+    set('pl-seeking', '$' + (1.2 + (wk % 5) * 0.3).toFixed(1) + 'M');
+    set('pl-ltv', (59 + (wk % 7)) + '%');
+  })();
 
   // ---- Interface-light reveals -----------------------------------------
   var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;

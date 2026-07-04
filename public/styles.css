@@ -504,3 +504,34 @@ section { padding: 76px 0; }
   .people-grid { grid-template-columns: 1fr; gap: 32px; }
   .people-side { position: static; }
 }
+
+/* ---- Current opportunities: rotating file + first-look + pipeline ---- */
+.opps { border-top: 1.5px solid var(--ink); }
+.opps-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); gap: 40px; align-items: start; }
+.opps .notefile .fig { font-family: var(--disp); font-size: 18px; color: var(--verified); }
+
+.opps-side { display: grid; gap: 16px; }
+.firstlook .btn-ghost { border-color: var(--ink); }
+.pipeline { border: 1px solid var(--ink); border-radius: var(--radius); background: var(--panel); padding: 16px 18px; }
+.pipeline-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin-bottom: 12px; }
+.pipeline-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.pipeline-metrics .v { display: block; font-family: var(--disp); font-size: 26px; line-height: 1; color: var(--ink); }
+.pipeline-metrics .l { display: block; font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-top: 5px; }
+
+.otherside {
+  display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;
+  margin-top: 24px; padding: 18px 20px;
+  border: 1px dashed var(--ink); border-radius: var(--radius); background: var(--paper-deep);
+}
+.otherside div { font-size: 14.5px; color: var(--body-c); max-width: 62ch; }
+.otherside strong { color: var(--ink); }
+
+/* checkline (first-look opt-in) */
+.checkline { display: flex; gap: 10px; align-items: flex-start; }
+.checkline input[type=checkbox] { width: 17px; height: 17px; margin-top: 2px; flex: 0 0 auto; accent-color: var(--verified); }
+.checkline label { font-size: 13px; color: var(--body-c); line-height: 1.5; }
+
+@media (max-width: 760px) {
+  .opps-grid { grid-template-columns: 1fr; gap: 24px; }
+  .otherside { flex-direction: column; align-items: flex-start; }
+}
