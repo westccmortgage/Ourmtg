@@ -47,7 +47,7 @@ export default function Login() {
         </div>
       ) : (
         <form className="card" onSubmit={submit}>
-          <p className="muted mt0">Enter your email and we’ll text-free email you a one-time link. No passwords, ever.</p>
+          <p className="muted mt0">Enter your email and we’ll send you a one-time sign-in link. No passwords, ever.</p>
           <Alert kind="error">{error}</Alert>
           <div className="field">
             <label htmlFor="email">Email address</label>

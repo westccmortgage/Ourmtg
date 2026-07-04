@@ -34,7 +34,7 @@ values ('default', jsonb_build_object(
   'home', jsonb_build_object(
     'headline', 'the mortgage,',
     'headlineAlt', 'minus the noise.',
-    'sub', 'One secure link: upload documents from your phone, watch your loan move stage by stage, and always know what''s next — without a single “just checking in” call.'
+    'sub', 'One secure link: upload documents from your phone, watch your loan move stage by stage, and always know what''s next - without a single "just checking in" call.'
   )
 ))
 on conflict (id) do nothing;
