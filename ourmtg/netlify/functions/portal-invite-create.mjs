@@ -7,8 +7,9 @@
 // Body: { loanFileId, role: 'borrower'|'coborrower'|'realtor', email?, phone?, name?, expiresInDays? }
 //
 // SECURITY
-//   • Caller must be the loan_file's OWNER (caller.id === loan_file.owner_user_id).
-//     (Team-member invites are a later enhancement; deny-by-default for MVP.)
+//   • Caller must be INTERNAL to the loan file — the owner
+//     (caller.id === loan_file.owner_user_id) OR a portal_team member of that owner
+//     (isInternal). Portal users (borrower/realtor/escrow/title) are denied.
 //   • Token is a 32-hex server secret. Default expiry 14 days.
 //   • Never reads or writes app_state. Writes only portal_invites + an audit row.
 //   • Sends the invite by email (platform mailer) when an email is provided; the link

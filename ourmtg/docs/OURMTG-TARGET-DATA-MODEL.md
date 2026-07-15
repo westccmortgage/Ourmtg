@@ -120,3 +120,30 @@ Each new object below is a **DRAFT**. It is mapped to existing tables, specifies
 - ❌ Do not weaken realtor/escrow/title structural blocks (RLS **and** code).
 - ❌ Do not store financial docs anywhere but the private `ourmtg-docs` bucket.
 - ❌ Do not uncomment draft SQL into the numbered migration sequence during Phase 0.
+
+---
+
+## Part E — Future tenancy: explicit `organization_id` (owner directive, Phase 1A)
+
+**Decision (owner):** `owner_user_id`-only tenancy is **not approved as the final model**. Today's
+schema (036–039) scopes everything by `owner_user_id` (the broker's `auth.users.id`) with no
+`org_id`. That is acceptable for the current single-owner deployment but must not harden into the
+permanent boundary.
+
+**Requirement:** the **first real operational migrations** (Phase 2+, when draft 040/041 become
+actual `supabase/migrations/*.sql`) must introduce an explicit `organization_id` boundary:
+
+- Add an `organizations` table (`id uuid pk`, name, created_at) and an `organization_id` column on
+  every new operational/domain table (`loan_events`, `notification_deliveries`, `loan_tasks`,
+  `loan_vendor_orders`, `loan_cash_to_close`) **in addition to** `owner_user_id`.
+- Index `organization_id`; scope RLS and application authorization by it (an owner/team belongs to
+  an organization; cross-org reads are denied).
+- Provide a backfill that maps existing `owner_user_id`s to a default organization so the migration
+  is non-breaking, and a membership table (`organization_members(organization_id, user_id, role)`)
+  that generalizes today's `portal_team` owner↔member relationship.
+- Existing tables (036–039) can adopt `organization_id` later via additive columns; do **not**
+  rewrite them in Phase 1A (no schema changes this phase).
+
+**Phase 1A stance:** this is recorded as the target only. **No tenancy schema change is made in
+Phase 1A** (owner decision #7: no new production tables; #9: no migrations applied). The directive
+binds the Phase 2 migration authors, not this phase.

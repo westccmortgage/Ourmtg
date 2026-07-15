@@ -18,3 +18,10 @@ deploy runbook. Do **not** simply uncomment/rename these files.
 |---|---|---|---|
 | `040_loan_events_and_deliveries.DRAFT.sql` | `loan_events`, `notification_deliveries` | B1, B3 | 2 |
 | `041_tasks_vendor_ctc.DRAFT.sql` | `loan_tasks`, `loan_vendor_orders`, `loan_cash_to_close` | B2, B4, B5 | 3 (owner-gated) |
+| `042_cron_heartbeat.DRAFT.sql` | `cron_heartbeat` (operational infra) | Part C | Apply only if verified missing (Phase 1A #6) |
+
+> **Future tenancy directive (owner, Phase 1A):** `owner_user_id`-only tenancy is NOT the
+> final model. The FIRST real operational migrations (Phase 2+) must introduce an explicit
+> `organization_id` boundary. When these drafts become real migrations, add `organization_id`
+> (FK to an organizations table) alongside `owner_user_id`, index it, and scope RLS by it.
+> See `docs/OURMTG-TARGET-DATA-MODEL.md` Part E.

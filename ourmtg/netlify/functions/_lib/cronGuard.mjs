@@ -1,45 +1,92 @@
-// cronGuard.mjs — schedule-only invocation gate for Netlify cron functions.
+// cronGuard.mjs — invocation gate for Netlify cron functions.
 //
-// isScheduledInvocation(req) returns true when EITHER:
-//   (a) The request carries Netlify's scheduled-event marker: header x-nf-event === 'schedule'.
-//       Netlify sets this on all scheduled invocations; x-nf-* headers cannot be spoofed by
-//       external callers through the Netlify edge.
-//   (b) Header x-cron-secret equals process.env.CRON_SECRET (non-empty string), as a
-//       manual/testing escape hatch. Also used for scheduled HTTP pings when a Netlify
-//       runtime version doesn't forward x-nf-event.
+// Phase 1A #4: header-trust is no longer the ONLY authorization. The default posture is a
+// VERIFIED SHARED SECRET (CRON_SECRET), compared in constant time. Netlify's platform
+// schedule header is accepted ONLY when the operator explicitly opts in via
+// CRON_ALLOW_NETLIFY_SCHEDULE=true — so a spoofed x-netlify-event header, on its own, no
+// longer authorizes anything unless that opt-in is deliberately set.
 //
-// NOTE for ops: If x-nf-event is not present in your Netlify runtime version, set CRON_SECRET
-// in your Netlify environment and trigger the cron via a scheduled HTTP ping that sends
-//   x-cron-secret: <CRON_SECRET>
-// instead. Never expose CRON_SECRET publicly — treat it like a password.
+// authorizeCron(req, env) → { ok: boolean, reason: string }
+//   reason ∈ 'secret' | 'netlify-schedule-optin' | 'no-secret' | 'bad-secret' | 'not-scheduled'
+//
+// RECOMMENDED OPS SETUP (verified-secret, platform-independent):
+//   Set CRON_SECRET in the Netlify environment and trigger the projector from an
+//   authenticated scheduler (e.g. a GitHub Actions cron, an uptime pinger, or Netlify's
+//   scheduled function calling itself) that sends:
+//       x-cron-secret: <CRON_SECRET>            (or ?cron_secret=<CRON_SECRET>)
+//   Only if you intend to rely on Netlify's built-in scheduler AND accept its header as
+//   proof of origin, additionally set CRON_ALLOW_NETLIFY_SCHEDULE=true. Never expose
+//   CRON_SECRET publicly — treat it like a password.
 
+// Constant-time string comparison (avoids leaking secret length/prefix via timing).
+// Returns false unless both are non-empty strings of equal length with equal bytes.
+export function timingSafeEqualStr(a, b) {
+  const x = typeof a === 'string' ? a : ''
+  const y = typeof b === 'string' ? b : ''
+  if (x.length === 0 || y.length === 0) return false
+  if (x.length !== y.length) return false
+  let diff = 0
+  for (let i = 0; i < x.length; i++) diff |= x.charCodeAt(i) ^ y.charCodeAt(i)
+  return diff === 0
+}
+
+function headerGet(req, name) {
+  if (!req || !req.headers) return ''
+  if (typeof req.headers.get === 'function') return req.headers.get(name) || ''
+  return req.headers[name] || ''
+}
+
+function presentedSecret(req) {
+  const h = headerGet(req, 'x-cron-secret')
+  if (h) return h
+  // Also accept ?cron_secret= for schedulers that can't set headers.
+  try {
+    const u = new URL(req.url || 'http://x/')
+    return u.searchParams.get('cron_secret') || ''
+  } catch { return '' }
+}
+
+// True if this looks like Netlify's platform scheduled invocation (header marker).
+// NOTE: this signal alone is NOT trusted unless CRON_ALLOW_NETLIFY_SCHEDULE=true.
+export function hasNetlifyScheduleSignal(req) {
+  return !!headerGet(req, 'x-netlify-event') || headerGet(req, 'x-nf-event') === 'schedule'
+}
+
+// Primary authorization decision. `env` defaults to process.env so callers can pass a
+// stub in tests.
+export function authorizeCron(req, env = process.env) {
+  const secret = env?.CRON_SECRET
+  const allowSchedule = String(env?.CRON_ALLOW_NETLIFY_SCHEDULE || '').toLowerCase() === 'true'
+
+  // 1) Verified shared secret — the default, preferred path.
+  if (secret && secret.length > 0) {
+    if (timingSafeEqualStr(presentedSecret(req), secret)) return { ok: true, reason: 'secret' }
+  }
+  // 2) Explicit operator opt-in to trust Netlify's platform schedule header.
+  if (allowSchedule && hasNetlifyScheduleSignal(req)) {
+    return { ok: true, reason: 'netlify-schedule-optin' }
+  }
+  // 3) Denied. Distinguish misconfiguration (no secret, no opt-in) from a bad attempt.
+  if (!secret && !allowSchedule) return { ok: false, reason: 'no-secret' }
+  if (secret && presentedSecret(req)) return { ok: false, reason: 'bad-secret' }
+  return { ok: false, reason: 'not-scheduled' }
+}
+
+// Backward-compatible boolean wrapper (kept so existing imports keep working). Prefer
+// authorizeCron for the reason string.
 export function isScheduledInvocation(req) {
-  // (a) Netlify's scheduled-event marker. VERIFIED EMPIRICALLY on this site
-  //     (2026-06-10): the scheduler sends `x-netlify-event` + `x-webhook-signature`,
-  //     and the Netlify bootstrap REJECTS (HTTP 500, before our handler runs) any
-  //     external request carrying x-netlify-event whose signature doesn't verify —
-  //     so if this header reaches our code, the invocation is genuinely Netlify's.
-  if (req.headers.get('x-netlify-event')) return true
-  // Older/alternate runtime marker, kept for safety.
-  if (req.headers.get('x-nf-event') === 'schedule') return true
-
-  // (b) Manual/testing escape hatch via a shared secret.
-  const secret = process.env.CRON_SECRET
-  if (secret && secret.length > 0 && req.headers.get('x-cron-secret') === secret) return true
-
-  return false
+  return authorizeCron(req).ok
 }
 
-// rejectionLog logs the header *keys* (NOT values) of a rejected request so
-// misfires are diagnosable in function logs without leaking secrets.
-export function rejectionLog(req, label) {
-  const keys = [...req.headers.keys()].join(', ')
-  console.warn(`[${label}] Forbidden: not a scheduled invocation. Received header keys: ${keys}`)
+// rejectionLog logs the header *keys* (NOT values) of a rejected request plus the reason,
+// so misfires are diagnosable in function logs without leaking secrets.
+export function rejectionLog(req, label, reason) {
+  const keys = req?.headers?.keys ? [...req.headers.keys()].join(', ') : ''
+  console.warn(`[${label}] Forbidden (${reason || 'unauthorized'}). Received header keys: ${keys}`)
 }
 
-// heartbeat records "this cron ran" in cron_heartbeat so ops can verify the
-// Netlify scheduler actually gets past the gate (vs silently 403ing).
-// Best-effort: never throws, never affects the cron's result.
+// heartbeat records "this cron ran" in cron_heartbeat so ops can verify the scheduler
+// actually gets past the gate (vs silently 403ing). Best-effort: never throws.
 export async function heartbeat(db, name, note) {
   try {
     await db.from('cron_heartbeat').upsert(

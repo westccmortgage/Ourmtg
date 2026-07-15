@@ -13,22 +13,45 @@
 // automations. This function does light validation, plus ONE Supabase write: when the
 // payload carries a consent block (the /apply TCPA checkbox), it appends immutable rows
 // to portal_consent (exact disclosure text + IP + UA) so the consent ledger required by
-// spec §M actually gets written — fail-soft, never blocks the lead. It never touches
-// app_state. Rate-limiting is a follow-up (front it with Netlify rate limits if abused).
+// spec §M actually gets written — fail-soft, never blocks the lead. It never touches app_state.
+//
+// ABUSE PROTECTION (Phase 1A #3): per-IP rate limit (best-effort, in-process), a raw
+// payload-size cap, and a honeypot field. See _lib/ratelimit.mjs for the durability caveat.
+// Tunables: LEAD_RATE_MAX (default 5), LEAD_RATE_WINDOW_MS (default 60000).
 
 import { admin, isConfigured } from './_lib/supabase.mjs'
+import { sharedLimiter, clientKey, isHoneypotTripped, validatePublicPayload } from './_lib/ratelimit.mjs'
+
+const RATE_MAX = Number(process.env.LEAD_RATE_MAX || 5)
+const RATE_WINDOW_MS = Number(process.env.LEAD_RATE_WINDOW_MS || 60_000)
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
-const json = (body, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...CORS } })
+const json = (body, status = 200, extraHeaders = {}) =>
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...CORS, ...extraHeaders } })
 
 export default async (req) => {
   if (req.method === 'OPTIONS') return new Response('', { status: 204, headers: CORS })
   if (req.method !== 'POST') return json({ ok: false, error: 'Method not allowed' }, 405)
+
+  // ── Rate limit (best-effort, per warm instance). Fail-OPEN if the limiter throws so a
+  //    limiter bug never blocks a legitimate borrower. ──────────────────────────────────
+  try {
+    const limiter = sharedLimiter({ windowMs: RATE_WINDOW_MS, max: RATE_MAX })
+    const verdict = limiter.check(clientKey(req))
+    if (!verdict.allowed) {
+      return json(
+        { ok: false, error: 'Too many submissions. Please wait a moment and try again.' },
+        429,
+        { 'retry-after': String(Math.ceil(verdict.retryAfterMs / 1000)) },
+      )
+    }
+  } catch (e) {
+    console.warn('[lead-submit] rate limiter error (failing open):', e?.message)
+  }
 
   const url = process.env.LEAD_INBOUND_URL
   const token = process.env.LEAD_INBOUND_TOKEN
@@ -36,8 +59,18 @@ export default async (req) => {
     return json({ ok: false, error: 'Lead intake is not configured yet.' }, 503)
   }
 
-  const body = await req.json().catch(() => null)
+  // Read raw text first so we can enforce a size cap before doing any parse work.
+  const raw = await req.text().catch(() => '')
+  const sizeCheck = validatePublicPayload(raw)
+  if (!sizeCheck.ok) return json({ ok: false, error: sizeCheck.error }, 400)
+
+  let body = null
+  try { body = JSON.parse(raw) } catch { body = null }
   if (!body || typeof body !== 'object') return json({ ok: false, error: 'Invalid submission' }, 400)
+
+  // Honeypot: bots fill hidden fields; humans never see them. Respond 200 without
+  // forwarding so we neither create a lead nor tip off the bot that it was caught.
+  if (isHoneypotTripped(body)) return json({ ok: true, accepted: true })
 
   // Minimal validation: we need a name and a way to reach the person.
   const name = String(body.name || `${body.firstName || ''} ${body.lastName || ''}`).trim()

@@ -1,0 +1,36 @@
+name: CI
+
+# Phase 1A #5: continuous verification of the OurMTG app (build + syntax + security tests).
+# The app lives in the ourmtg/ subdirectory (root netlify.toml sets base = "ourmtg").
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ourmtg
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ourmtg/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Syntax-check functions
+        run: npm run check
+
+      - name: Run tests (authz, cron, rate limit, domain contracts)
+        run: npm test
+
+      - name: Build the SPA
+        run: npm run build

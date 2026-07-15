@@ -18,14 +18,28 @@ Open the SQL editor for the shared project and run, in order:
 1. `supabase/migrations/036_ourmtg_portal.sql`
 2. `supabase/migrations/037_portal_invites.sql`
 3. `supabase/migrations/038_ourmtg_team_and_requests.sql`
+4. `supabase/migrations/039_site_settings.sql`
 
 All are idempotent — safe to re-run. Verify:
 
 ```sql
+-- 11 loan_/portal_ tables across 036–038 (site_settings, added by 039, is named
+-- differently and is checked separately below).
 select count(*) from information_schema.tables
  where table_schema='public' and (table_name like 'loan_%' or table_name like 'portal_%');
--- expect 11 (10 portal/loan tables + portal_team)
-select id, public from storage.buckets where id='ourmtg-docs';   -- must be: false
+-- expect 11 (loan_files/documents/conditions/messages/strategy + portal_users/access/
+--            invites/consent/access_log/team)
+
+select count(*) from information_schema.tables
+ where table_schema='public' and table_name='site_settings';   -- expect 1 (migration 039)
+select id, public from storage.buckets where id='ourmtg-docs';  -- must be: false
+
+-- cron_heartbeat: written by the projector's heartbeat() but NOT created by 036–039.
+-- The write is fail-soft, so its absence won't break the cron — but the "LO dashboard
+-- empty" troubleshooting below relies on it. Verify it exists; if it does NOT, apply the
+-- non-runnable draft docs/phase0/draft-migrations/042_cron_heartbeat.DRAFT.sql (guard removed).
+select count(*) from information_schema.tables
+ where table_schema='public' and table_name='cron_heartbeat';  -- expect 1 (create if 0)
 ```
 
 ## 2. Netlify environment variables
@@ -45,7 +59,15 @@ them BEFORE deploying; changing them requires a redeploy.
 | `LEAD_INBOUND_URL` | GRCRM webhook URL | server (lead-submit proxy) |
 | `LEAD_INBOUND_TOKEN` | GRCRM lead_sources token | **SECRET — server only** |
 | `RESEND_PLATFORM_KEY` | Resend API key | optional; emails fail-soft without it |
-| `CRON_SECRET` | random string | optional; manual cron trigger |
+| `OURMTG_ADMIN_EMAILS` | comma-separated admin emails | **required to edit site settings** (Phase 1A #1); empty = no one can |
+| `CRON_SECRET` | long random string | **now the primary cron authorization** (Phase 1A #4); scheduler sends `x-cron-secret` |
+| `CRON_ALLOW_NETLIFY_SCHEDULE` | `true`/`false` | optional opt-in to trust Netlify's `x-netlify-event` header; default off |
+| `LEAD_RATE_MAX` / `LEAD_RATE_WINDOW_MS` | numbers | optional lead-submit rate-limit tunables (default 5 / 60000) |
+
+> **Cron note (Phase 1A #4):** the projector no longer trusts the `x-netlify-event` header
+> by itself. Either (a) set `CRON_SECRET` and trigger `sync-loan-file` from an authenticated
+> scheduler that sends `x-cron-secret: <CRON_SECRET>`, or (b) set `CRON_ALLOW_NETLIFY_SCHEDULE=true`
+> to keep using Netlify's built-in scheduler. Do at least one, or the projector 403s every run.
 
 Then: **Deploys → Trigger deploy → Clear cache and deploy site.**
 

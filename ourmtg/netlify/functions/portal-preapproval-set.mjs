@@ -10,7 +10,8 @@
 //   expires: 'YYYY-MM-DD', or null to clear (omit to leave unchanged)
 //
 // SECURITY
-//   • Caller must be the loan_file's OWNER.
+//   • Caller must be INTERNAL to the loan file — the owner OR a portal_team member of
+//     that owner (isInternal). This is the ONLY writer of loan_files.preapproval_*.
 //   • Never touches app_state. Best-effort notifies any Realtor(s) already granted
 //     portal_access to this file, so the update is actually seen, not just stored.
 
