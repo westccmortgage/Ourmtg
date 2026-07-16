@@ -1,8 +1,6 @@
 // Phase 1C Functional Completion — browser-side pending-operation registry.
-//
-// A logical mutation receives one idempotency key BEFORE the first request. The key,
-// material payload and expected revision remain in localStorage across double-click,
-// timeout and refresh recovery. Callers clear the entry only after a definitive result.
+// A logical mutation receives one idempotency key before the first request and keeps it
+// through double-click, timeout and refresh recovery.
 
 const PREFIX = 'ourmtg.pending.v1:'
 
@@ -12,11 +10,8 @@ function storageOrNull(storage) {
 }
 
 function operationId() {
-  try {
-    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
-  } catch { /* fallback below */ }
-  const rand = Math.random().toString(36).slice(2)
-  return `op-${Date.now().toString(36)}-${rand}`
+  try { if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID() } catch { /* fallback */ }
+  return `op-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 }
 
 export function stableJson(value) {
@@ -38,29 +33,18 @@ export function readPendingOperation(scope, storage) {
   const s = storageOrNull(storage)
   if (!s || !scope) return null
   try {
-    const raw = s.getItem(PREFIX + scope)
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    if (!parsed?.idempotencyKey || !parsed?.materialKey) return null
-    return parsed
-  } catch {
-    return null
-  }
+    const parsed = JSON.parse(s.getItem(PREFIX + scope) || 'null')
+    return parsed?.idempotencyKey && parsed?.materialKey ? parsed : null
+  } catch { return null }
 }
 
-export function getOrCreatePendingOperation(scope, material, storage) {
+export function getOrCreatePendingOperation(scope, material, storage, options = {}) {
   const s = storageOrNull(storage)
-  const materialKey = stableJson(material)
   const existing = readPendingOperation(scope, s)
-  if (existing && existing.materialKey === materialKey) return existing
-
-  const op = {
-    idempotencyKey: operationId(),
-    material,
-    materialKey,
-    createdAt: new Date().toISOString(),
-  }
-  try { s?.setItem(PREFIX + scope, JSON.stringify(op)) } catch { /* in-memory request still works */ }
+  const materialKey = stableJson(material)
+  if (existing && (options.reuseExisting === true || existing.materialKey === materialKey)) return existing
+  const op = { idempotencyKey: operationId(), material, materialKey, createdAt: new Date().toISOString() }
+  try { s?.setItem(PREFIX + scope, JSON.stringify(op)) } catch { /* request can still continue */ }
   return op
 }
 
