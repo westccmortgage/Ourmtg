@@ -16,30 +16,12 @@
 // ── Re-export the existing stage vocabulary (do not redefine) ────────────────────────────────
 export { STAGE_STEPS, STAGE_LABEL, MILESTONE_LABEL, STAGE_COLOR, stepIndex } from '../lib/pipeline.js'
 
-// ── NEW: domain-event types (loan_events, draft B1). Dotted, past-tense-ish, stable strings. ──
-// These do not exist anywhere in the app today, so defining them here is not duplication.
-export const EVENT_TYPES = Object.freeze([
-  'lead.created',
-  'deal.stage_changed', // detail carries { from, to } where `to` ∈ existing STAGE_STEPS
-  'doc.requested',
-  'doc.uploaded',
-  'doc.accepted',
-  'doc.rejected',
-  'condition.opened',
-  'condition.submitted',
-  'condition.cleared',
-  'preapproval.set',
-  'preapproval.cleared',
-  'invite.created',
-  'invite.accepted',
-  'message.sent',
-  'notification.sent',
-  'ai.flag',
-  'ai.next_best_action',
-])
+// ── Domain-event types + task lifecycle: re-exported from the canonical Phase 1B module
+// (src/domain/lifecycles.js) so there is ONE source, never a forked copy. The Phase 0
+// placeholder TASK_STATUS (open/done/cancelled) is superseded by the full 13-state lifecycle.
+export { EVENT_TYPES, TASK_STATUS } from './lifecycles.js'
 
 // ── NEW: statuses/types for proposed objects that do not exist yet ───────────────────────────
-export const TASK_STATUS = Object.freeze(['open', 'done', 'cancelled'])
 export const TASK_AUDIENCE = Object.freeze(['team', 'borrower'])
 
 export const VENDOR_TYPE = Object.freeze(['appraisal', 'title', 'escrow', 'insurance'])

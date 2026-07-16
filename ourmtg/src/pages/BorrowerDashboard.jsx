@@ -5,12 +5,16 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { getStatus, getChecklist, listConditions, listMessages } from '../lib/api'
-import { BRAND } from '../lib/config'
 import { STAGE_COLOR } from '../lib/pipeline'
 import { money, shortDate } from '../lib/format'
 import StatusTracker from '../components/StatusTracker'
 import MessageThread from '../components/MessageThread'
 import { Alert, Spinner, StatusChip, Empty } from '../components/ui'
+import { flag } from '../domain/flags'
+import NeedsAttention from '../components/NeedsAttention'
+import CashToClosePanel from '../components/CashToClosePanel'
+import ThirdPartyPanel from '../components/ThirdPartyPanel'
+import TeamContactCard from '../components/TeamContactCard'
 
 export default function BorrowerDashboard({ grants }) {
   const [active, setActive] = useState(grants[0]?.loan_file_id || null)
@@ -55,6 +59,11 @@ export default function BorrowerDashboard({ grants }) {
           </select>
         )}
       </div>
+
+      {/* Phase 1B (flag-gated): borrower "Needs your attention" at the very top. */}
+      {flag('borrowerWorkspaceV2') && (
+        <NeedsAttention loanFileId={active} checklistItems={checklist?.items || []} conditions={conditions || []} />
+      )}
 
       <div className="card" style={{ overflow: 'hidden' }}>
         <span className="stagenum" style={{ '--stage': STAGE_COLOR[status.stage] }} aria-hidden="true">
@@ -121,25 +130,18 @@ export default function BorrowerDashboard({ grants }) {
         )}
       </div>
 
+      {/* Phase 1B (flag-gated): money-needed-to-close planning view + third-party progress. */}
+      {flag('cashToClosePlanner') && <CashToClosePanel inputs={null} />}
+      {flag('thirdPartyTracking') && <ThirdPartyPanel statuses={{}} />}
+
       <div className="card">
         <div className="card-head"><h2>Messages</h2></div>
         <MessageThread loanFileId={active} messages={messages} onSent={reloadMessages}
           placeholder="Ask your loan team anything…" />
       </div>
 
-      <div className="card">
-        <div className="card-head"><h2>Your team</h2></div>
-        <div className="row">
-          <div className="grow">
-            <div className="rlabel">{BRAND.company}</div>
-            <div className="rsub">
-              Office <a href={`tel:${BRAND.officePhone}`}>{BRAND.officePhone}</a>
-              {BRAND.loPhone && <> · {BRAND.loName || 'Direct'} <a href={`tel:${BRAND.loPhone}`}>{BRAND.loPhone}</a></>}
-            </div>
-          </div>
-          <a className="btn btn-ghost btn-sm" href={`tel:${BRAND.loPhone || BRAND.officePhone}`}>Call</a>
-        </div>
-      </div>
+      {/* Verified mortgage-team contact + licensing (always shown). */}
+      <TeamContactCard />
     </>
   )
 }

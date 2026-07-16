@@ -21,6 +21,17 @@ export const FLAGS = Object.freeze({
 
   // Phase 4 — governed AI (B7).
   aiSupervisor: false, // AI File Supervisor; borrower-facing output stays LO-approval-gated
+
+  // Phase 1B — borrower operations foundation (all default OFF; not wired to production DB).
+  taskServiceEnabled: false, // pure task state-machine service wiring
+  eventServiceEnabled: false, // pure append-only event service wiring
+  borrowerWorkspaceV2: false, // enhanced borrower dashboard (needs-attention/progress/cash/etc.)
+  loanTeamWorkspaceV2: false, // enhanced loan-team dashboard (blockers / what-changed-today)
+  cashToClosePlanner: false, // deterministic cash-to-close planning view
+  disclosureTracking: false, // provider-neutral disclosure state tracking UI/model
+  thirdPartyTracking: false, // appraisal/title/escrow/insurance status placeholders
+  notificationEvents: false, // provider-neutral notification event model
+  aiSuggestions: false, // AI may only PROPOSE (never act); stays disabled
 })
 
 /**
