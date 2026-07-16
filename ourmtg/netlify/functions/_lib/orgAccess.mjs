@@ -1,45 +1,17 @@
-// Phase 1C — organization access resolution for the task pilot. The organization boundary is
-// explicit: a caller acts within an organization they are an ACTIVE member of, AND must still
-// pass the existing per-loan-file authorization (resolveAccess). Membership is NEVER inferred
-// from an email domain.
-//
-// Review fixes:
-//   F3: multi-org safety — verify membership in a SPECIFIC organization (the record's org),
-//       not just the caller's arbitrary first membership.
-//   F10: distinguish "pilot not provisioned" (table absent) from "not a member" (forbidden).
+// Phase 1C EXT-1 — LOAN-SCOPED organization resolution. The organization is resolved from the
+// LOAN FILE (loan_files.organization_id), not from the caller's arbitrary first membership.
+//   • Internal (owner/team) users must ALSO be active members of the file's organization.
+//   • Borrowers/co-borrowers use portal_access and do NOT require organization membership.
+//   • Realtor/escrow/title are denied financial/document tasks.
+// Membership is never inferred from an email domain. Users may belong to multiple organizations.
 
-// Resolve the caller's active organization membership for CREATE/LIST (no record org yet).
-// Returns { ok, provisioned, org }:
-//   provisioned=false → the pilot schema isn't applied (organization_members missing) → 503.
-//   ok=false, provisioned=true → the caller is not an active member of any org → 403.
-//   ok=true → org = { organization_id, role }.
-export async function resolveOrg(svc, userId) {
-  const { data, error } = await svc
-    .from('organization_members')
-    .select('organization_id, role, status')
-    .eq('user_id', userId)
-    .eq('status', 'active')
-    .order('created_at', { ascending: true })
-    .limit(1)
-    .maybeSingle()
-  if (error) {
-    if (error.code === '42P01') return { ok: false, provisioned: false, org: null }
-    throw new Error('organization_members read: ' + error.message)
-  }
-  if (!data) return { ok: false, provisioned: true, org: null }
-  return { ok: true, provisioned: true, org: { organization_id: data.organization_id, role: data.role } }
-}
-
-// F3: verify the caller is an ACTIVE member of a SPECIFIC organization (the record's org).
-// Returns { ok, provisioned, role }.
+// Active membership check for a SPECIFIC org. { ok, provisioned, role }.
 export async function memberOfOrg(svc, userId, organizationId) {
   if (!organizationId) return { ok: false, provisioned: true, role: null }
   const { data, error } = await svc
     .from('organization_members')
     .select('role, status')
-    .eq('user_id', userId)
-    .eq('organization_id', organizationId)
-    .eq('status', 'active')
+    .eq('user_id', userId).eq('organization_id', organizationId).eq('status', 'active')
     .maybeSingle()
   if (error) {
     if (error.code === '42P01') return { ok: false, provisioned: false, role: null }
@@ -49,10 +21,35 @@ export async function memberOfOrg(svc, userId, organizationId) {
   return { ok: true, provisioned: true, role: data.role }
 }
 
-// Map an access visibility (from resolveAccess) to a task-service actor type.
+// Map a resolveAccess result to a task-service actor type.
 export function actorTypeFor(access, teamRole) {
   if (!access) return null
   if (access.role === 'owner') return 'loan_officer'
   if (access.role === 'team') return teamRole === 'assistant' ? 'assistant' : 'processor'
   return access.visibility // borrower/coborrower/realtor/escrow/title
+}
+
+// Resolve the full task-authorization context for a loan file + access grant.
+// Returns { ok, provisioned, organizationId, isInternal, actorType, error }.
+//   provisioned=false → the file has no organization_id (pilot not backfilled) → 503.
+//   error='not_org_member' → internal user lacks membership in the file's org → 403.
+//   error='forbidden_role' → realtor/escrow/title → 403.
+export async function resolveTaskContext(svc, userId, loanFile, access) {
+  const organizationId = loanFile?.organization_id || null
+  if (!organizationId) return { ok: false, provisioned: false, error: 'not_provisioned' }
+  if (!access) return { ok: false, provisioned: true, error: 'no_access' }
+  const isInternal = access.role === 'owner' || access.role === 'team'
+  const actorType = actorTypeFor(access, access.teamRole)
+
+  if (isInternal) {
+    const mem = await memberOfOrg(svc, userId, organizationId)
+    if (!mem.provisioned) return { ok: false, provisioned: false, error: 'not_provisioned' }
+    if (!mem.ok) return { ok: false, provisioned: true, error: 'not_org_member' } // EXT-1: internal MUST be a member
+    return { ok: true, provisioned: true, organizationId, isInternal: true, actorType }
+  }
+  // Borrower / co-borrower: portal_access is sufficient, NO membership required (EXT-1).
+  if (access.visibility === 'borrower' || access.visibility === 'coborrower') {
+    return { ok: true, provisioned: true, organizationId, isInternal: false, actorType }
+  }
+  return { ok: false, provisioned: true, error: 'forbidden_role' } // realtor/escrow/title
 }

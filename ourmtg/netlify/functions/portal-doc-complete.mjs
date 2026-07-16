@@ -23,8 +23,11 @@ import {
   authUser, json, preflight, loadLoanFile, resolveAccess, canSeeFinancials, logAccess, randomToken,
 } from './_lib/portal.mjs'
 import { sendPlatformEmail, brandedEmail, esc } from './_lib/mailer.mjs'
-import { memberOfOrg, actorTypeFor } from './_lib/orgAccess.mjs'
+import { resolveTaskContext } from './_lib/orgAccess.mjs'
 import { createTaskRepo } from './_lib/taskRepo.mjs'
+import { taskPilotEnabled } from './_lib/featureFlags.mjs'
+import { isUuid } from './_lib/requestGuard.mjs'
+import { requestHash } from './_lib/idempotency.mjs'
 
 const BUCKET = 'ourmtg-docs'
 const OURMTG_URL = (process.env.OURMTG_URL || 'https://ourmtg.com').replace(/\/$/, '')
@@ -65,69 +68,68 @@ export default async (req) => {
   }
   if (!doc.storage_path) return json({ ok: false, error: 'No upload was prepared for this document' }, 409)
 
-  // Verify the object exists before claiming it was uploaded.
+  // Verify the object exists before claiming it was uploaded. FAIL CLOSED (EXT-5): a storage
+  // list ERROR is NOT permission to continue.
   const slash = doc.storage_path.lastIndexOf('/')
   const dir = slash >= 0 ? doc.storage_path.slice(0, slash) : ''
   const base = slash >= 0 ? doc.storage_path.slice(slash + 1) : doc.storage_path
   const { data: listed, error: lErr } = await svc.storage.from(BUCKET).list(dir, { search: base, limit: 100 })
   if (lErr) {
-    console.warn('[portal-doc-complete] storage list failed (allowing):', lErr.message)
-  } else if (!Array.isArray(listed) || !listed.some((o) => o.name === base)) {
+    console.error('[portal-doc-complete] storage verify failed (fail-closed)')
+    return json({ ok: false, error: 'Could not verify the upload — please try again' }, 502)
+  }
+  if (!Array.isArray(listed) || !listed.some((o) => o.name === base)) {
     return json({ ok: false, error: 'Upload not found — please try uploading again' }, 409)
   }
 
-  // Flip to uploaded.
-  const { error: uErr } = await svc.from('loan_documents')
-    .update({ status: 'uploaded', uploaded_at: new Date().toISOString() })
-    .eq('id', doc.id)
-  if (uErr) {
-    console.error('[portal-doc-complete] update failed:', uErr.message)
-    return json({ ok: false, error: 'Could not mark uploaded' }, 500)
+  const taskId = String(body.taskId || '').trim()
+  let taskTransition = null
+
+  // EXT-5: task-linked finalize is ONE atomic RPC (mark uploaded + link + submit + history +
+  // event). Gated by the borrower pilot flag; otherwise the legacy flip runs. If the RPC fails,
+  // NEITHER the document nor the task changed (both roll back).
+  if (taskId && isUuid(taskId) && taskPilotEnabled()) {
+    const repo = createTaskRepo({ db: svc })
+    let task
+    try { task = await repo.getTask(taskId) } catch { return json({ ok: false, error: 'Database error' }, 500) }
+    if (!task) return json({ ok: false, error: 'Task not found' }, 404)
+    const ctx = await resolveTaskContext(svc, auth.user.id, loanFile, access)
+    if (!ctx.ok || ctx.isInternal) return json({ ok: false, error: 'Not permitted' }, 403)
+    if (task.organization_id !== ctx.organizationId) return json({ ok: false, error: 'Cross-organization access denied' }, 403)
+    if (!repo.borrowerCanSeeTask(task, auth.user.id)) return json({ ok: false, error: 'Not permitted' }, 403)
+    const idem = `finalize:${documentId}:${taskId}:${task.revision}`
+    const rHash = requestHash({ documentId, taskId, actor: auth.user.id, revision: task.revision })
+    const result = await repo.finalizeDocumentSubmit({
+      documentId, task, actor: { type: ctx.actorType, id: auth.user.id },
+      correlationId: await randomToken(8), idempotencyKey: idem, requestHash: rHash, at: new Date().toISOString(),
+    })
+    if (!result.ok) {
+      const st = { stale_task: 409, cross_loan_document: 400, not_borrower_task: 403, invalid_transition: 409, idempotency_conflict: 409, document_not_found: 404, task_not_found: 404 }
+      return json({ ok: false, error: result.error === 'persist_failed' ? 'Could not submit your document' : result.error }, st[result.error] || 500)
+    }
+    taskTransition = { ok: true, to: 'submitted' }
+  } else {
+    // Legacy flow (no task link): flip the document to uploaded.
+    const { error: uErr } = await svc.from('loan_documents')
+      .update({ status: 'uploaded', uploaded_at: new Date().toISOString() }).eq('id', doc.id)
+    if (uErr) {
+      console.error('[portal-doc-complete] update failed')
+      return json({ ok: false, error: 'Could not mark uploaded' }, 500)
+    }
   }
 
   // Timeline entry (portal tables only — NOT app_state).
   try {
     await svc.from('loan_messages').insert({
-      loan_file_id: doc.loan_file_id,
-      owner_user_id: doc.owner_user_id,
-      direction: 'in',
+      loan_file_id: doc.loan_file_id, owner_user_id: doc.owner_user_id, direction: 'in',
       author_role: access.visibility === 'coborrower' ? 'coborrower' : 'borrower',
-      body: `Uploaded: ${doc.label || doc.doc_key}`,
-      channel: 'portal',
+      body: `Uploaded: ${doc.label || doc.doc_key}`, channel: 'portal',
     })
-  } catch (e) { console.warn('[portal-doc-complete] message log (non-fatal):', e.message) }
+  } catch (e) { console.warn('[portal-doc-complete] message log (non-fatal)') }
 
   await logAccess(svc, {
     portalUser: auth.user.id, loanFileId: doc.loan_file_id, action: 'upload_doc_complete', target: doc.doc_key, req,
   })
-
-  // ── Document ↔ task linking (task pilot). ONLY after finalize succeeded (status is now
-  // 'uploaded'), transition the linked borrower task to 'submitted' and link this document.
-  // An upload failure earlier returned before this point, so the task never moves on failure.
-  let taskTransition = null
-  const taskId = String(body.taskId || '').trim()
-  if (taskId) {
-    try {
-      const repo = createTaskRepo({ db: svc })
-      const task = await repo.getTask(taskId)
-      // F3: verify the caller is an active member of the TASK's organization (not just any org).
-      const mem = task ? await memberOfOrg(svc, auth.user.id, task.organization_id) : { ok: false }
-      if (mem.ok && task && task.loan_file_id === doc.loan_file_id
-          && ['borrower', 'coborrower'].includes(task.responsible_party_type)) {
-        const actor = { type: actorTypeFor(access, access.teamRole), id: auth.user.id }
-        taskTransition = await repo.transition({
-          task, action: 'submit', actor, linkedDocumentId: doc.id,
-          correlationId: await randomToken(8),
-          idempotencyKey: `submit:${taskId}:${doc.id}`, at: new Date().toISOString(),
-        })
-      } else {
-        taskTransition = { ok: false, error: 'task_not_linkable' }
-      }
-    } catch (e) {
-      console.warn('[portal-doc-complete] task submit (non-fatal):', e.message)
-      taskTransition = { ok: false, error: 'task_update_failed' }
-    }
-  }
 
   // ── Notify the loan officer (owner) — fail-soft ─────────────────────────────
   try {

@@ -17,7 +17,7 @@ export default function TeamTaskCard({ loanFileId }) {
   const [tasks, setTasks] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const [form, setForm] = useState({ title: '', borrowerExplanation: '', internalRequirement: '', dueAt: '', isBlocking: false, requiredDocumentType: '' })
+  const [form, setForm] = useState({ title: '', borrowerExplanation: '', internalRequirement: '', dueAt: '', isBlocking: false, requiredDocumentType: '', sharedWithBorrowers: true })
 
   const load = useCallback(() => {
     return listTasks(loanFileId).then((r) => setTasks(r?.tasks || [])).catch((e) => setError(e?.message || 'Could not load tasks.'))
@@ -32,20 +32,22 @@ export default function TeamTaskCard({ loanFileId }) {
       // F1: a stable per-submit idempotency key so a retried request creates ONE task.
       const idempotencyKey = (globalThis.crypto?.randomUUID?.() || `create-${loanFileId}-${Date.now()}`)
       await createTask({ loanFileId, taskType: 'document_request', idempotencyKey, ...form })
-      setForm({ title: '', borrowerExplanation: '', internalRequirement: '', dueAt: '', isBlocking: false, requiredDocumentType: '' })
+      setForm({ title: '', borrowerExplanation: '', internalRequirement: '', dueAt: '', isBlocking: false, requiredDocumentType: '', sharedWithBorrowers: true })
       await load()
     } catch (e2) { setError(e2?.message || 'Could not create task.') } finally { setBusy(false) }
   }
 
   async function act(taskId, action, needsReason) {
-    let reason
+    let borrowerVisibleReason
     if (needsReason) {
-      reason = window.prompt('Borrower-visible reason for rejection:')
-      if (!reason || reason.trim().length < 3) return
+      borrowerVisibleReason = window.prompt('Borrower-visible reason for rejection:')
+      if (!borrowerVisibleReason || borrowerVisibleReason.trim().length < 3) return
     }
     setBusy(true); setError('')
     try {
-      await transitionTask(taskId, action, reason ? { reason } : {})
+      // EXT-8: mandatory idempotency key per action.
+      const idempotencyKey = (globalThis.crypto?.randomUUID?.() || `act-${taskId}-${action}-${Date.now()}`)
+      await transitionTask(taskId, action, { idempotencyKey, ...(borrowerVisibleReason ? { borrowerVisibleReason } : {}) })
       await load()
     } catch (e) { setError(e?.message || 'Could not update task.') } finally { setBusy(false) }
   }
@@ -68,6 +70,7 @@ export default function TeamTaskCard({ loanFileId }) {
           <div className="field"><label>Expected document type</label>
             <input value={form.requiredDocumentType} onChange={(e) => setForm({ ...form, requiredDocumentType: e.target.value })} placeholder="paystubs_30d" /></div>
         </div>
+        <label className="check"><input type="checkbox" checked={form.sharedWithBorrowers} onChange={(e) => setForm({ ...form, sharedWithBorrowers: e.target.checked })} /> Shared with all borrowers on this file</label>
         <label className="check"><input type="checkbox" checked={form.isBlocking} onChange={(e) => setForm({ ...form, isBlocking: e.target.checked })} /> Blocks the loan</label>
         <button className="btn btn-primary btn-sm" disabled={busy} style={{ marginTop: 10 }}>{busy ? 'Working…' : 'Create task'}</button>
       </form>

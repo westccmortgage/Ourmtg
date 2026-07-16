@@ -1,85 +1,84 @@
-// POST /.netlify/functions/portal-task-create   (JWT; task pilot; INTERNAL only)
-// Loan team creates ONE borrower document task on a file they can access. Atomic (task+history+
-// event) via the repo/RPC. Records a best-effort borrower notification-INTENT event (no send).
-// Body: { loanFileId, title, borrowerExplanation, internalRequirement?, dueAt?, isBlocking?,
-//         requiredDocumentType?, taskType? }
-
+// POST /.netlify/functions/portal-task-create   (JWT; INTERNAL only; FF_LOAN_TEAM_TASK_PILOT)
+// Loan team creates ONE borrower task on a file they can access + are an org member of. Atomic
+// (task + history + event + in-tx notification-intent) via the create RPC. Mandatory idempotency
+// key + material-payload hash (EXT-8). Participant selection required (EXT-7).
 import { admin, isConfigured } from './_lib/supabase.mjs'
-import { authUser, json, preflight, loadLoanFile, resolveAccess, isInternal, logAccess, randomToken } from './_lib/portal.mjs'
-import { resolveOrg, actorTypeFor } from './_lib/orgAccess.mjs'
+import { authUser, json, preflight, loadLoanFile, resolveAccess, logAccess, randomToken } from './_lib/portal.mjs'
+import { resolveTaskContext } from './_lib/orgAccess.mjs'
 import { createTaskRepo } from './_lib/taskRepo.mjs'
-import { notificationIntentFor } from './_lib/notificationIntent.mjs'
+import { loanTeamTaskPilotEnabled } from './_lib/featureFlags.mjs'
+import { readJsonBody, isUuid, isEnum, boundedString, isValidTimestamp } from './_lib/requestGuard.mjs'
+import { isValidIdempotencyKey, requestHash } from './_lib/idempotency.mjs'
+
+const TASK_TYPES = ['document_request', 'document_reupload', 'condition', 'signature', 'explanation', 'appointment', 'missing_page', 'information_request']
+const PRIORITIES = ['low', 'normal', 'high', 'urgent']
 
 export default async (req) => {
   if (req.method === 'OPTIONS') return preflight()
   if (req.method !== 'POST') return json({ ok: false, error: 'Method not allowed' }, 405)
   if (!isConfigured()) return json({ ok: false, error: 'Service not configured' }, 503)
+  if (!loanTeamTaskPilotEnabled()) return json({ ok: false, error: 'Not available' }, 404) // EXT-10
   const auth = await authUser(req)
   if (!auth) return json({ ok: false, error: 'Unauthorized' }, 401)
 
-  const body = await req.json().catch(() => ({}))
-  const loanFileId = String(body.loanFileId || '').trim()
-  const title = String(body.title || '').trim()
-  if (!loanFileId || !title) return json({ ok: false, error: 'Missing loanFileId or title' }, 400)
+  const parsed = await readJsonBody(req)           // EXT-11
+  if (!parsed.ok) return json({ ok: false, error: parsed.error }, parsed.status)
+  const body = parsed.body
+
+  const loanFileId = body.loanFileId
+  const title = boundedString(body.title, 200)
+  if (!isUuid(loanFileId)) return json({ ok: false, error: 'Invalid loanFileId' }, 400)
+  if (!title) return json({ ok: false, error: 'A title is required' }, 400)
+  // EXT-8: idempotency key is MANDATORY (no random fallback).
+  if (!isValidIdempotencyKey(body.idempotencyKey)) return json({ ok: false, error: 'A valid idempotencyKey is required' }, 400)
+  if (body.taskType != null && !isEnum(body.taskType, TASK_TYPES)) return json({ ok: false, error: 'Invalid taskType' }, 400)
+  if (body.priority != null && !isEnum(body.priority, PRIORITIES)) return json({ ok: false, error: 'Invalid priority' }, 400)
+  if (!isValidTimestamp(body.dueAt)) return json({ ok: false, error: 'Invalid due date' }, 400)
+  // EXT-7: participant selection required — a specific participant OR shared-with-borrowers.
+  const shared = body.sharedWithBorrowers === true
+  const responsibleUserId = body.responsibleUserId != null ? body.responsibleUserId : null
+  if (responsibleUserId != null && !isUuid(responsibleUserId)) return json({ ok: false, error: 'Invalid responsibleUserId' }, 400)
+  if (!shared && !responsibleUserId) return json({ ok: false, error: 'Select a participant or share with borrowers' }, 400)
 
   const svc = admin()
-  let loanFile, access, org
+  let loanFile, access, ctx
   try {
     loanFile = await loadLoanFile(svc, loanFileId)
     access = await resolveAccess(svc, auth.user.id, loanFile)
-    org = await resolveOrg(svc, auth.user.id)
+    ctx = await resolveTaskContext(svc, auth.user.id, loanFile, access)
   } catch (e) {
-    console.error('[portal-task-create]', e.message)
+    console.error('[portal-task-create] error')
     return json({ ok: false, error: 'Database error' }, 500)
   }
   if (!loanFile) return json({ ok: false, error: 'Loan file not found' }, 404)
-  if (!isInternal(access)) return json({ ok: false, error: 'Only the loan team can create tasks' }, 403)
-  if (!org.provisioned) return json({ ok: false, error: 'Task pilot is not enabled for this environment' }, 503)
-  if (!org.ok) return json({ ok: false, error: 'No organization membership' }, 403)
+  if (!ctx.provisioned) return json({ ok: false, error: 'Task pilot is not enabled for this loan' }, 503)
+  if (!ctx.ok || !ctx.isInternal) return json({ ok: false, error: 'Only the loan team can create tasks' }, 403)
 
-  // F9: validate the optional due date (YYYY-MM-DD or ISO) before it reaches the DB.
-  let dueAt = null
-  if (body.dueAt != null && String(body.dueAt).trim() !== '') {
-    const d = new Date(body.dueAt)
-    if (Number.isNaN(d.getTime())) return json({ ok: false, error: 'Invalid due date' }, 400)
-    dueAt = d.toISOString()
+  const dueAt = body.dueAt ? new Date(body.dueAt).toISOString() : null
+  const input = {
+    organization_id: ctx.organizationId, loan_file_id: loanFileId,
+    task_type: isEnum(body.taskType, TASK_TYPES) ? body.taskType : 'document_request',
+    title,
+    borrower_explanation: boundedString(body.borrowerExplanation, 2000),
+    internal_requirement: boundedString(body.internalRequirement, 2000),
+    responsible_party_type: 'borrower',
+    responsible_user_id: responsibleUserId, shared_with_borrowers: shared,
+    priority: isEnum(body.priority, PRIORITIES) ? body.priority : 'normal',
+    is_blocking: !!body.isBlocking, due_at: dueAt,
+    required_document_type: boundedString(body.requiredDocumentType, 80),
   }
-
+  // EXT-8: canonical hash of the MATERIAL payload (what defines the task).
+  const rHash = requestHash({ ...input, actor: auth.user.id })
   const repo = createTaskRepo({ db: svc })
-  const actor = { type: actorTypeFor(access, access.teamRole), id: auth.user.id }
-  const correlationId = await randomToken(8)
-  // F1: honor a client-supplied idempotency key so a double-submit creates ONE task; otherwise
-  // fall back to a random key (best-effort). Clients should send a stable key per create action.
-  const idempotencyKey = String(body.idempotencyKey || `create:${loanFileId}:${await randomToken(6)}`)
   const result = await repo.createTask({
-    actor, correlationId, idempotencyKey, at: new Date().toISOString(),
-    input: {
-      organization_id: org.org.organization_id, loan_file_id: loanFileId,
-      task_type: ['document_request', 'document_reupload', 'condition', 'signature', 'explanation',
-        'appointment', 'missing_page', 'information_request'].includes(body.taskType) ? body.taskType : 'document_request',
-      title: title.slice(0, 200),
-      borrower_explanation: (body.borrowerExplanation || '').slice(0, 2000) || null,
-      internal_requirement: (body.internalRequirement || '').slice(0, 2000) || null,
-      responsible_party_type: 'borrower',
-      priority: ['low', 'normal', 'high', 'urgent'].includes(body.priority) ? body.priority : 'normal',
-      is_blocking: !!body.isBlocking,
-      due_at: dueAt,
-      required_document_type: (body.requiredDocumentType || '').slice(0, 80) || null,
-    },
+    actor: { type: ctx.actorType, id: auth.user.id }, input,
+    correlationId: await randomToken(8), idempotencyKey: body.idempotencyKey, requestHash: rHash,
+    at: new Date().toISOString(),
   })
-  if (!result.ok) return json({ ok: false, error: result.error === 'persist_failed' ? 'Could not create task' : result.error }, 400)
-
-  // Best-effort borrower notification INTENT (no send in Phase 1C). Only on a FRESH create
-  // (a deduped repeat already recorded its intent).
-  const intent = result.deduped ? null : notificationIntentFor('create', { taskId: result.task_id, loanFileId })
-  if (intent) {
-    try {
-      await svc.from('loan_events').insert({
-        organization_id: org.org.organization_id, loan_file_id: loanFileId, event_type: intent.event_type,
-        actor_type: 'system', source_system: 'ourmtg', correlation_id: correlationId, metadata: intent.metadata,
-      })
-    } catch (e) { console.warn('[portal-task-create] notification intent (non-fatal):', e?.message) }
+  if (!result.ok) {
+    const map = { idempotency_conflict: 409, missing_fields: 400 }
+    return json({ ok: false, error: result.error === 'persist_failed' ? 'Could not create task' : result.error }, map[result.error] || (result.error === 'persist_failed' ? 500 : 400))
   }
   await logAccess(svc, { portalUser: auth.user.id, loanFileId, action: 'view_file', target: 'task_create', req })
-  return json({ ok: true, taskId: result.task_id })
+  return json({ ok: true, taskId: result.task_id, deduped: !!result.deduped })
 }

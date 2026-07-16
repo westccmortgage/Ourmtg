@@ -11,6 +11,14 @@ it → opens it → uploads the document → task moves to submitted → team re
 request more info) → borrower sees the result**, with **every material transition writing an
 immutable event + task-history row atomically**. Flag-gated (default off); migration written, NOT applied.
 
+## External-findings reconciliation (EXT-1 … EXT-13)
+This report predates the external review. The authoritative, per-finding reconciliation for EXT-1 through
+EXT-13 (status, files, implementation, tests, results) is **`OURMTG-PHASE1C-EXT-RECONCILIATION.md`**. The
+migration is now **Rev 2** (3 service_role-only RPCs, loan-scoped org via `loan_files.organization_id`,
+revision-based concurrency, request-hash idempotency, in-transaction notification intents, `ON DELETE
+RESTRICT` audit protection, deterministic slug backfill). The self-review `OURMTG-PHASE1C-REVIEW-FIXES.md`
+(F1–F13) is a **separate** document and is not the external findings.
+
 ## Exact files changed
 **New (backend):** `docs/phase1c/migration/043_ourmtg_operational_pilot.sql`;
 `netlify/functions/_lib/{orgAccess,taskRepo,notificationIntent}.mjs`;
@@ -31,11 +39,15 @@ org boundary, indexes, `unique(organization_id, idempotency_key)`, append-only t
 RLS, backfill, validation, rollback). **Migrations applied: NONE.** Outside `supabase/migrations/`; branch-only per acceptance doc.
 
 ## Transaction / RPC design
-Two `SECURITY DEFINER` RPCs perform the atomic writes. `ourmtg_task_transition` locks the task, updates
-it, appends `loan_task_history`, and appends `loan_events` in **one transaction**; any failure RAISES and
-rolls back all three. Idempotency is enforced by the `loan_events` unique key (a repeat returns without a
-second side effect). Validation is delegated to the canonical pure Phase 1B task service BEFORE the RPC,
-so an invalid transition never reaches the database. No independent client-side history/event inserts.
+**Three** `SECURITY DEFINER`, `service_role`-only RPCs (Rev 2) perform the atomic writes.
+`ourmtg_task_transition` takes an action + expected revision, locks the task `FOR UPDATE`, rejects a
+`revision` mismatch (`stale_task`), re-validates the graph, **derives** the to-status + event server-side,
+bumps the revision, and appends `loan_task_history` + `loan_events` (and a same-transaction notification
+intent on reject/more-info) in **one transaction**. `ourmtg_task_create` and
+`ourmtg_document_finalize_submit` are likewise atomic. Any failure RAISES and rolls back. Idempotency is a
+mandatory key + `request_hash` (same key + same payload dedupes; different payload → `idempotency_conflict`).
+Validation is also delegated to the canonical pure Phase 1B task service BEFORE the RPC for fast-fail. No
+independent client-side history/event inserts.
 
 ## Endpoints added
 `portal-task-list`, `portal-task-detail`, `portal-task-create`, `portal-task-transition` (+ extended
@@ -63,11 +75,14 @@ reject-with-reason, request more info, reopen, complete). Not a generic workflow
 / `VITE_FF_LOAN_TEAM_TASK_PILOT`. Notification model + AI remain disabled.
 
 ## Tests & PASS count
-**131 total / 131 pass / 0 fail** (baseline 114 → **17 new**). New: `taskRepo` (atomic persistence,
-validate-before-write, idempotency, deliberate-failure zero-partial-writes, borrower scrub, AI/partner
-denial, borrower-visible listing), `taskLabels` (EN/ES/RU), `notificationIntent`. Existing task-service /
-AI-boundary / role-visibility suites cover create/view/submit/accept/reject/more-info/reopen and AI/role
-denial. No external vendor calls; no production secrets; injected adapters + pure helpers only.
+**179 total / 179 pass / 0 fail** (post-EXT). New EXT suites: `orgAccess` (EXT-1 loan-scoped org),
+`featureFlags` (EXT-10 fail-closed), `requestGuard` (EXT-11 hardening + prototype-pollution),
+`idempotency` (EXT-8 key/hash). `taskRepo` was rewritten to the Rev 2 RPC contract and now covers EXT-4
+(stale/revision), EXT-5 (atomic finalize + rollback + cross-loan), EXT-6 (reason set/clear), EXT-7
+(participant visibility, two borrowers), EXT-8 (idempotency conflict), EXT-9 (one intent in-tx).
+`taskLabels` expanded for EXT-6. Existing task-service / AI-boundary / role-visibility suites unchanged.
+No external vendor calls; no production secrets; injected adapters + pure helpers only — **fake-adapter
+tests are NOT live-database tests.**
 
 ## Build result
 `npm run build` **success** — JS 575.79 kB (gzip 175.62 kB); Vite >500 kB chunk **warning only**.
@@ -95,7 +110,7 @@ With flags off, the current portal is unchanged.
 ## Remaining risks
 1. `npm audit`: 3 (1 moderate, 2 high) unchanged — nodemailer (runtime; CRLF mitigated, upgrade to ^9 pending) + vite/esbuild (dev-only).
 2. Live-DB behavior of the RPCs/RLS is acceptance-scripted but not executed here.
-3. Single-org pilot assumption: a file's org is resolved via the caller's membership (no `loan_files.organization_id` column yet) — fine for one org; multi-org needs that column + per-file org tagging.
+3. ~~Single-org pilot assumption~~ **RESOLVED (EXT-1):** `loan_files.organization_id` now exists; the gateway resolves a file's org from the file and supports multi-org users. Requires the EXT-13 backfill to report zero unprovisioned files before flags are enabled.
 4. Notification intents are recorded (best-effort) but nothing is sent.
 5. Full per-task upload wiring uses the existing checklist upload with a `?task` deep link; a dedicated per-task upload surface is a follow-up.
 6. Flags default off ⇒ pilot value is demonstrable only when enabled per-environment.

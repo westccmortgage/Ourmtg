@@ -5,7 +5,7 @@
 //   conditions (src/lib/needsAttention) — current behavior preserved.
 import { Link } from 'react-router-dom'
 import { borrowerActionItems } from '../lib/needsAttention'
-import { taskStatusLabel, taskActionLabel, blocksLabel, borrowerMustAct } from '../lib/taskLabels'
+import { taskStatusLabel, taskActionLabel, blocksLabel, borrowerMustAct, reasonLabel } from '../lib/taskLabels'
 import { useLang } from '../lib/i18n'
 import { StatusChip } from './ui'
 
@@ -20,6 +20,11 @@ function TaskRow({ t, loanFileId, lang }) {
           {t.is_blocking && <span className="chip" style={{ marginLeft: 8 }}>{blocksLabel(lang)}</span>}
         </div>
         {t.borrower_explanation && <div className="rsub">{t.borrower_explanation}</div>}
+        {t.borrower_visible_status_reason && (
+          <div className="rsub" style={{ color: 'var(--danger, #b91c1c)' }}>
+            {reasonLabel(lang)}: {t.borrower_visible_status_reason}
+          </div>
+        )}
       </div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <span className="chip gray">{taskStatusLabel(t.status, lang)}</span>

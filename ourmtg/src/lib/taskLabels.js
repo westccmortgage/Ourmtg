@@ -27,11 +27,17 @@ const ACTION = {
 
 const BLOCKS = { en: 'Blocks your loan', es: 'Bloquea tu préstamo', ru: 'Блокирует ваш кредит' }
 
+// EXT-6: trilingual prefix for the borrower-visible status reason the team leaves on a
+// reject / more-info decision. The reason text itself is authored by the team (free text);
+// this only localizes the leading label so the borrower always sees a translated framing.
+const REASON = { en: 'Reason', es: 'Motivo', ru: 'Причина' }
+
 const pick = (map, key, lang) => (map[key] && (map[key][lang] || map[key].en)) || key
 
 export function taskStatusLabel(status, lang = 'en') { return pick(STATUS, status, lang) }
 export function taskActionLabel(action, lang = 'en') { return pick(ACTION, action, lang) }
 export function blocksLabel(lang = 'en') { return BLOCKS[lang] || BLOCKS.en }
+export function reasonLabel(lang = 'en') { return REASON[lang] || REASON.en }
 
 // True for statuses where the borrower is expected to act (vs. under review / done).
 export function borrowerMustAct(status) {
