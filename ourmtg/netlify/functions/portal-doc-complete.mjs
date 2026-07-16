@@ -23,7 +23,7 @@ import {
   authUser, json, preflight, loadLoanFile, resolveAccess, canSeeFinancials, logAccess, randomToken,
 } from './_lib/portal.mjs'
 import { sendPlatformEmail, brandedEmail, esc } from './_lib/mailer.mjs'
-import { resolveOrg, actorTypeFor } from './_lib/orgAccess.mjs'
+import { memberOfOrg, actorTypeFor } from './_lib/orgAccess.mjs'
 import { createTaskRepo } from './_lib/taskRepo.mjs'
 
 const BUCKET = 'ourmtg-docs'
@@ -108,10 +108,11 @@ export default async (req) => {
   const taskId = String(body.taskId || '').trim()
   if (taskId) {
     try {
-      const org = await resolveOrg(svc, auth.user.id)
       const repo = createTaskRepo({ db: svc })
       const task = await repo.getTask(taskId)
-      if (org && task && task.loan_file_id === doc.loan_file_id && org.organization_id === task.organization_id
+      // F3: verify the caller is an active member of the TASK's organization (not just any org).
+      const mem = task ? await memberOfOrg(svc, auth.user.id, task.organization_id) : { ok: false }
+      if (mem.ok && task && task.loan_file_id === doc.loan_file_id
           && ['borrower', 'coborrower'].includes(task.responsible_party_type)) {
         const actor = { type: actorTypeFor(access, access.teamRole), id: auth.user.id }
         taskTransition = await repo.transition({

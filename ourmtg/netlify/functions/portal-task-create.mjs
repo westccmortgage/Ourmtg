@@ -34,16 +34,27 @@ export default async (req) => {
   }
   if (!loanFile) return json({ ok: false, error: 'Loan file not found' }, 404)
   if (!isInternal(access)) return json({ ok: false, error: 'Only the loan team can create tasks' }, 403)
-  if (!org) return json({ ok: false, error: 'No organization membership' }, 403)
+  if (!org.provisioned) return json({ ok: false, error: 'Task pilot is not enabled for this environment' }, 503)
+  if (!org.ok) return json({ ok: false, error: 'No organization membership' }, 403)
+
+  // F9: validate the optional due date (YYYY-MM-DD or ISO) before it reaches the DB.
+  let dueAt = null
+  if (body.dueAt != null && String(body.dueAt).trim() !== '') {
+    const d = new Date(body.dueAt)
+    if (Number.isNaN(d.getTime())) return json({ ok: false, error: 'Invalid due date' }, 400)
+    dueAt = d.toISOString()
+  }
 
   const repo = createTaskRepo({ db: svc })
   const actor = { type: actorTypeFor(access, access.teamRole), id: auth.user.id }
   const correlationId = await randomToken(8)
-  const idempotencyKey = `create:${loanFileId}:${await randomToken(6)}`
+  // F1: honor a client-supplied idempotency key so a double-submit creates ONE task; otherwise
+  // fall back to a random key (best-effort). Clients should send a stable key per create action.
+  const idempotencyKey = String(body.idempotencyKey || `create:${loanFileId}:${await randomToken(6)}`)
   const result = await repo.createTask({
     actor, correlationId, idempotencyKey, at: new Date().toISOString(),
     input: {
-      organization_id: org.organization_id, loan_file_id: loanFileId,
+      organization_id: org.org.organization_id, loan_file_id: loanFileId,
       task_type: ['document_request', 'document_reupload', 'condition', 'signature', 'explanation',
         'appointment', 'missing_page', 'information_request'].includes(body.taskType) ? body.taskType : 'document_request',
       title: title.slice(0, 200),
@@ -52,18 +63,19 @@ export default async (req) => {
       responsible_party_type: 'borrower',
       priority: ['low', 'normal', 'high', 'urgent'].includes(body.priority) ? body.priority : 'normal',
       is_blocking: !!body.isBlocking,
-      due_at: body.dueAt || null,
+      due_at: dueAt,
       required_document_type: (body.requiredDocumentType || '').slice(0, 80) || null,
     },
   })
   if (!result.ok) return json({ ok: false, error: result.error === 'persist_failed' ? 'Could not create task' : result.error }, 400)
 
-  // Best-effort borrower notification INTENT (no send in Phase 1C).
-  const intent = notificationIntentFor('create', { taskId: result.task_id, loanFileId })
+  // Best-effort borrower notification INTENT (no send in Phase 1C). Only on a FRESH create
+  // (a deduped repeat already recorded its intent).
+  const intent = result.deduped ? null : notificationIntentFor('create', { taskId: result.task_id, loanFileId })
   if (intent) {
     try {
       await svc.from('loan_events').insert({
-        organization_id: org.organization_id, loan_file_id: loanFileId, event_type: intent.event_type,
+        organization_id: org.org.organization_id, loan_file_id: loanFileId, event_type: intent.event_type,
         actor_type: 'system', source_system: 'ourmtg', correlation_id: correlationId, metadata: intent.metadata,
       })
     } catch (e) { console.warn('[portal-task-create] notification intent (non-fatal):', e?.message) }

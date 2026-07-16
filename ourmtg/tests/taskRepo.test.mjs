@@ -38,12 +38,16 @@ function fakeDb({ failRpc = false } = {}) {
     async rpc(name, p) {
       if (failRpc) throw new Error('simulated db failure')
       const key = p.p_idempotency_key ? `${p.p_organization_id}:${p.p_idempotency_key}` : null
-      if (key && idem.has(key)) return { data: { ok: true, deduped: true }, error: null }
+      if (key && idem.has(key)) {
+        // F2: on dedupe, surface the existing task_id (from the recorded event).
+        const ev = events.find((e) => `${e.organization_id}:${e.idempotency_key}` === key)
+        return { data: { ok: true, deduped: true, ...(ev?.source_record_id ? { task_id: ev.source_record_id } : {}) }, error: null }
+      }
       if (name === 'ourmtg_task_create') {
         const id = `task-${++idSeq}`
         tasks.set(id, { id, organization_id: p.p_organization_id, loan_file_id: p.p_loan_file_id, task_type: p.p_task_type, title: p.p_title, borrower_explanation: p.p_borrower_explanation, internal_requirement: p.p_internal_requirement, responsible_party_type: p.p_responsible_party_type, status: 'created' })
         history.push({ task_id: id, from_status: null, to_status: 'created', actor_type: p.p_actor_type })
-        events.push({ organization_id: p.p_organization_id, loan_file_id: p.p_loan_file_id, event_type: 'task.created', idempotency_key: p.p_idempotency_key })
+        events.push({ organization_id: p.p_organization_id, loan_file_id: p.p_loan_file_id, event_type: 'task.created', idempotency_key: p.p_idempotency_key, source_record_id: id })
         if (key) idem.add(key)
         return { data: { ok: true, deduped: false, task_id: id }, error: null }
       }
@@ -51,9 +55,10 @@ function fakeDb({ failRpc = false } = {}) {
         const t = tasks.get(p.p_task_id)
         if (!t) return { data: null, error: { message: 'task_not_found' } }
         const from = t.status
+        if (from === p.p_to_status) return { data: null, error: { message: 'noop_transition' } } // F8
         t.status = p.p_to_status
         history.push({ task_id: p.p_task_id, from_status: from, to_status: p.p_to_status, actor_type: p.p_actor_type })
-        events.push({ organization_id: p.p_organization_id, loan_file_id: t.loan_file_id, event_type: p.p_event_type, idempotency_key: p.p_idempotency_key })
+        events.push({ organization_id: p.p_organization_id, loan_file_id: t.loan_file_id, event_type: p.p_event_type, idempotency_key: p.p_idempotency_key, source_record_id: p.p_task_id })
         if (key) idem.add(key)
         return { data: { ok: true, deduped: false, from, to: p.p_to_status }, error: null }
       }
@@ -154,6 +159,17 @@ test('AI cannot transition via the repo (zero writes)', async () => {
   const r = await repo.transition({ task: { ...db.tasks.get(c.task_id), status: 'team_review' }, action: 'accept', actor: { type: 'ai' } })
   assert.equal(r.error, 'ai_forbidden')
   assert.equal(db.events.length, before)
+})
+
+test('F1/F2: duplicate create with same idempotency key → one task, returns the same task_id', async () => {
+  const db = fakeDb(); const repo = createTaskRepo({ db })
+  const input = { organization_id: 'org', loan_file_id: 'f', title: 'Upload W-2', task_type: 'document_request' }
+  const a = await repo.createTask({ actor: lo, idempotencyKey: 'dupe-create', input })
+  const b = await repo.createTask({ actor: lo, idempotencyKey: 'dupe-create', input })
+  assert.equal(a.deduped, false)
+  assert.equal(b.deduped, true)
+  assert.equal(b.task_id, a.task_id)  // same task returned, not undefined
+  assert.equal(db.tasks.size, 1)      // only one task created
 })
 
 test('listBorrowerVisibleTasks returns only borrower tasks, scrubbed of internal fields', async () => {

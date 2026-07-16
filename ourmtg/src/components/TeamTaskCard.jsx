@@ -29,7 +29,9 @@ export default function TeamTaskCard({ loanFileId }) {
     if (!form.title.trim()) { setError('A borrower-facing title is required.'); return }
     setBusy(true); setError('')
     try {
-      await createTask({ loanFileId, taskType: 'document_request', ...form })
+      // F1: a stable per-submit idempotency key so a retried request creates ONE task.
+      const idempotencyKey = (globalThis.crypto?.randomUUID?.() || `create-${loanFileId}-${Date.now()}`)
+      await createTask({ loanFileId, taskType: 'document_request', idempotencyKey, ...form })
       setForm({ title: '', borrowerExplanation: '', internalRequirement: '', dueAt: '', isBlocking: false, requiredDocumentType: '' })
       await load()
     } catch (e2) { setError(e2?.message || 'Could not create task.') } finally { setBusy(false) }

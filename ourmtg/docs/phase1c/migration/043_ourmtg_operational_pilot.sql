@@ -152,9 +152,11 @@ create or replace function public.ourmtg_task_create(
 ) returns jsonb language plpgsql security definer set search_path = public as $$
 declare v_task_id uuid;
 begin
+  -- F2: on a duplicate idempotency key, RETURN the existing task id (never a second insert).
   if p_idempotency_key is not null then
-    perform 1 from public.loan_events where organization_id = p_organization_id and idempotency_key = p_idempotency_key;
-    if found then return jsonb_build_object('ok', true, 'deduped', true); end if;
+    select e.source_record_id::uuid into v_task_id from public.loan_events e
+      where e.organization_id = p_organization_id and e.idempotency_key = p_idempotency_key limit 1;
+    if v_task_id is not null then return jsonb_build_object('ok', true, 'deduped', true, 'task_id', v_task_id); end if;
   end if;
   insert into public.loan_tasks(organization_id, loan_file_id, task_type, title, borrower_explanation,
     internal_requirement, responsible_party_type, responsible_user_id, status, priority, is_blocking,
@@ -193,6 +195,8 @@ begin
   if not found then raise exception 'task_not_found'; end if;
   if v_task.organization_id <> p_organization_id then raise exception 'org_mismatch'; end if;
   v_from := v_task.status;
+  -- F8: defense-in-depth — reject a no-op / same-status transition (a real transition changes status).
+  if v_from = p_to_status then raise exception 'noop_transition'; end if;
 
   update public.loan_tasks set
     status = p_to_status,

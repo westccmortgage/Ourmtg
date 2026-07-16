@@ -4,7 +4,7 @@
 
 import { admin, isConfigured } from './_lib/supabase.mjs'
 import { authUser, json, preflight, loadLoanFile, resolveAccess, isInternal, canSeeFinancials, logAccess } from './_lib/portal.mjs'
-import { resolveOrg } from './_lib/orgAccess.mjs'
+import { memberOfOrg } from './_lib/orgAccess.mjs'
 import { createTaskRepo, scrubTaskForBorrower } from './_lib/taskRepo.mjs'
 
 export default async (req) => {
@@ -19,19 +19,20 @@ export default async (req) => {
 
   const svc = admin()
   const repo = createTaskRepo({ db: svc })
-  let task, loanFile, access, org
+  let task, loanFile, access, mem
   try {
     task = await repo.getTask(taskId)
     if (!task) return json({ ok: false, error: 'Task not found' }, 404)
     loanFile = await loadLoanFile(svc, task.loan_file_id)
     access = await resolveAccess(svc, auth.user.id, loanFile)
-    org = await resolveOrg(svc, auth.user.id)
+    mem = await memberOfOrg(svc, auth.user.id, task.organization_id) // F3: scoped to the task's org
   } catch (e) {
     console.error('[portal-task-detail]', e.message)
     return json({ ok: false, error: 'Database error' }, 500)
   }
   if (!access) return json({ ok: false, error: 'No access to this loan file' }, 403)
-  if (!org || org.organization_id !== task.organization_id) return json({ ok: false, error: 'Cross-organization access denied' }, 403)
+  if (!mem.provisioned) return json({ ok: false, error: 'Task pilot is not enabled for this environment' }, 503)
+  if (!mem.ok) return json({ ok: false, error: 'Cross-organization access denied' }, 403)
 
   const internal = isInternal(access)
   if (!internal) {

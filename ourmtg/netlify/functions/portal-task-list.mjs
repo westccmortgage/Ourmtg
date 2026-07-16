@@ -31,7 +31,8 @@ export default async (req) => {
   }
   if (!loanFile) return json({ ok: false, error: 'Loan file not found' }, 404)
   if (!access) return json({ ok: false, error: 'No access to this loan file' }, 403)
-  if (!org) return json({ ok: false, error: 'No organization membership' }, 403)
+  if (!org.provisioned) return json({ ok: false, error: 'Task pilot is not enabled for this environment' }, 503)
+  if (!org.ok) return json({ ok: false, error: 'No organization membership' }, 403)
   // Realtor/escrow/title: no financial tasks.
   if (!isInternal(access) && !canSeeFinancials(access.visibility)) {
     return json({ ok: false, error: 'Not permitted' }, 403)
@@ -40,8 +41,8 @@ export default async (req) => {
   const repo = createTaskRepo({ db: svc })
   try {
     const tasks = isInternal(access)
-      ? await repo.listTasksForLoan(loanFileId, org.organization_id)
-      : await repo.listBorrowerVisibleTasks(loanFileId, org.organization_id)
+      ? await repo.listTasksForLoan(loanFileId, org.org.organization_id)
+      : await repo.listBorrowerVisibleTasks(loanFileId, org.org.organization_id)
     await logAccess(svc, { portalUser: auth.user.id, loanFileId, action: 'view_file', target: 'tasks', req })
     return json({ ok: true, view: isInternal(access) ? 'team' : 'borrower', tasks })
   } catch (e) {

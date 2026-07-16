@@ -5,8 +5,8 @@
 // Body: { taskId, action, reason?, evidence?, linkedDocumentId? }
 
 import { admin, isConfigured } from './_lib/supabase.mjs'
-import { authUser, json, preflight, loadLoanFile, resolveAccess, logAccess, randomToken } from './_lib/portal.mjs'
-import { resolveOrg, actorTypeFor } from './_lib/orgAccess.mjs'
+import { authUser, json, preflight, loadLoanFile, resolveAccess, isInternal, logAccess, randomToken } from './_lib/portal.mjs'
+import { memberOfOrg, actorTypeFor } from './_lib/orgAccess.mjs'
 import { createTaskRepo } from './_lib/taskRepo.mjs'
 import { notificationIntentFor } from './_lib/notificationIntent.mjs'
 
@@ -29,34 +29,45 @@ export default async (req) => {
 
   const svc = admin()
   const repo = createTaskRepo({ db: svc })
-  let task, loanFile, access, org
+  let task, loanFile, access, mem
   try {
     task = await repo.getTask(taskId)
     if (!task) return json({ ok: false, error: 'Task not found' }, 404)
     loanFile = await loadLoanFile(svc, task.loan_file_id)
     access = await resolveAccess(svc, auth.user.id, loanFile)
-    org = await resolveOrg(svc, auth.user.id)
+    mem = await memberOfOrg(svc, auth.user.id, task.organization_id) // F3: scoped to the task's org
   } catch (e) {
     console.error('[portal-task-transition]', e.message)
     return json({ ok: false, error: 'Database error' }, 500)
   }
   if (!access) return json({ ok: false, error: 'No access to this loan file' }, 403)
-  if (!org || org.organization_id !== task.organization_id) return json({ ok: false, error: 'Cross-organization access denied' }, 403)
+  if (!mem.provisioned) return json({ ok: false, error: 'Task pilot is not enabled for this environment' }, 503)
+  if (!mem.ok) return json({ ok: false, error: 'Cross-organization access denied' }, 403)
 
   const actor = { type: actorTypeFor(access, access.teamRole), id: auth.user.id }
-  // Stable idempotency per (task, action, pre-state): a duplicate request dedupes to one event.
-  const idempotencyKey = String(body.idempotencyKey || `${taskId}:${action}:${task.status}`)
+  // F4: include updated_at in the derived key so a LEGITIMATE repeat of the same (action, status)
+  // after a reopen cycle is NOT falsely deduped — only a true concurrent double-submit (same
+  // task row version) collides.
+  const idempotencyKey = String(body.idempotencyKey || `${taskId}:${action}:${task.status}:${task.updated_at || ''}`)
   const correlationId = await randomToken(8)
   const reason = body.reason != null ? String(body.reason).slice(0, 2000) : null
   // Reject requires a borrower-visible reason.
   if (action === 'reject' && (!reason || reason.trim().length < 3)) {
     return json({ ok: false, error: 'A borrower-visible reason is required to reject' }, 400)
   }
+  // F5: only INTERNAL (team) actors may attach evidence, and only if it serializes under a size
+  // cap. Borrower-supplied evidence is ignored (never stored) to prevent injection/bloat of the
+  // immutable history. Cap-or-drop (never truncate into invalid JSON).
+  let evidence = null
+  if (isInternal(access) && body.evidence != null) {
+    try { if (JSON.stringify(body.evidence).length <= 4000) evidence = body.evidence } catch { /* drop */ }
+  }
 
   const result = await repo.transition({
-    task, action, actor, reason,
-    evidence: body.evidence != null ? body.evidence : null,
-    linkedDocumentId: body.linkedDocumentId || null,
+    task, action, actor, reason, evidence,
+    // F6: linkedDocumentId is SERVER-SET only (via portal-doc-complete). Never trust it from the
+    // public transition body (would allow linking an arbitrary document to a task — IDOR).
+    linkedDocumentId: null,
     correlationId, idempotencyKey, at: new Date().toISOString(),
   })
   if (!result.ok) {

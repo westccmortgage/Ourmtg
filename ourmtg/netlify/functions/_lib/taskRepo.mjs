@@ -6,7 +6,8 @@
 // The `db` client is injected (service-role Supabase in production; a fake in tests). It must
 // provide db.rpc(name, params) → { data, error } and db.from(table) query builder.
 
-import { transitionTask, ACTION_TO_STATUS } from '../../../src/domain/services/taskService.js'
+// F7: import the FUNCTIONS-LOCAL state machine (self-contained; parity-tested vs src/domain).
+import { transitionTask, ACTION_TO_STATUS } from './taskLifecycle.mjs'
 
 const SOURCE_SYSTEM = 'ourmtg'
 // task action → the loan_events event_type it emits.
