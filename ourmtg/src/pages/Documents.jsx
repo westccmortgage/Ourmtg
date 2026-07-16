@@ -3,12 +3,12 @@
 // uploads straight to the private bucket, then finalizes. Re-uploads after a rejection
 // reuse the same flow. Realtors can never reach this (the gateway 403s the checklist).
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { getChecklist, uploadDocument } from '../lib/api'
 import { shortDate } from '../lib/format'
 import { Alert, Spinner, StatusChip } from '../components/ui'
 
-function DocItem({ loanFileId, item, onDone }) {
+function DocItem({ loanFileId, item, onDone, taskId }) {
   const inputRef = useRef(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -20,7 +20,7 @@ function DocItem({ loanFileId, item, onDone }) {
     if (file.size > 25 * 1024 * 1024) { setError('That file is over 25 MB — please upload a smaller file.'); return }
     setError(''); setBusy(true)
     try {
-      await uploadDocument(loanFileId, item.docKey, file)
+      await uploadDocument(loanFileId, item.docKey, file, taskId)
       onDone()
     } catch (err) {
       setError(err?.message || 'Upload failed. Please try again.')
@@ -61,6 +61,8 @@ function DocItem({ loanFileId, item, onDone }) {
 
 export default function Documents() {
   const { loanFileId } = useParams()
+  const [params] = useSearchParams()
+  const taskId = params.get('task') || null // task-pilot deep link: finalize links to this task
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -98,7 +100,7 @@ export default function Documents() {
       <div className="card">
         <div className="card-head"><h2>Your items</h2></div>
         {borrowerItems.map((it) => (
-          <DocItem key={it.docKey} loanFileId={loanFileId} item={it} onDone={load} />
+          <DocItem key={it.docKey} loanFileId={loanFileId} item={it} onDone={load} taskId={taskId} />
         ))}
       </div>
 
@@ -106,7 +108,7 @@ export default function Documents() {
         <div className="card">
           <div className="card-head"><h2>Co-borrower items</h2></div>
           {coItems.map((it) => (
-            <DocItem key={it.docKey} loanFileId={loanFileId} item={it} onDone={load} />
+            <DocItem key={it.docKey} loanFileId={loanFileId} item={it} onDone={load} taskId={taskId} />
           ))}
         </div>
       )}

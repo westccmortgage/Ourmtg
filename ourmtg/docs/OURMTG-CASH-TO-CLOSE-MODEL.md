@@ -41,3 +41,23 @@ net                  = cashIdentified − estimatedCashToClose  → shortfall (n
 `illustrative` (≤2 inputs) · `estimated` (default) · `verified` (caller asserts `verified:true`) ·
 `final` (**only** with a verified final source — `sourceType:'closing_disclosure'` + `verified:true`).
 Requesting `final` without that source is **downgraded to estimated** — never faked.
+
+---
+
+## Phase 1C — Source adapter boundary (documentation only; NOT integrated)
+
+Cash-to-close is NOT persisted in Phase 1C and the pure calculator is unchanged. This documents
+how future VERIFIED sources will feed `computeCashToClose(inputs)` without changing the engine:
+
+| Source | Feeds | Resulting classification | Status |
+|---|---|---|---|
+| Manual planning inputs (LO/borrower) | any input field | `illustrative` / `estimated` | future |
+| `loan_strategy` (WCCI, LO-approved) | loan amount, program, down-payment shape | `estimated` | schema exists; not wired |
+| Lender **Loan Estimate** | origination, points, third-party, prepaids | `estimated` | not integrated |
+| Escrow/title estimate | title_escrow, recording_government | `estimated` | not integrated |
+| Insurance quote | homeowners_insurance | `estimated` | not integrated |
+| **Closing Disclosure** | verified final line items | `final` (only with `verified:true` + `sourceType:'closing_disclosure'`) | not integrated |
+
+Contract: an adapter maps its source into the engine's input shape and sets `sourceType`/`verified`.
+The engine alone decides classification — `final` is honored ONLY from a verified Closing Disclosure
+(never fabricated). No source integration exists today; this is the boundary a future phase implements.

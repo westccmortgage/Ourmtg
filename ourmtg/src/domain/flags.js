@@ -32,6 +32,10 @@ export const FLAGS = Object.freeze({
   thirdPartyTracking: false, // appraisal/title/escrow/insurance status placeholders
   notificationEvents: false, // provider-neutral notification event model
   aiSuggestions: false, // AI may only PROPOSE (never act); stays disabled
+
+  // Phase 1C — operational task pilot (VITE_FF_TASK_PILOT / VITE_FF_LOAN_TEAM_TASK_PILOT).
+  taskPilot: false, // borrower: Needs-Your-Attention uses real loan_tasks (fallback to derived)
+  loanTeamTaskPilot: false, // team: create/review borrower document tasks on a loan file
 })
 
 /**

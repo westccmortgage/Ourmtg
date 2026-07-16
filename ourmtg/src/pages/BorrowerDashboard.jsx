@@ -4,7 +4,7 @@
 // files via a compact selector, though most borrowers have exactly one.
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { getStatus, getChecklist, listConditions, listMessages } from '../lib/api'
+import { getStatus, getChecklist, listConditions, listMessages, listTasks } from '../lib/api'
 import { STAGE_COLOR } from '../lib/pipeline'
 import { money, shortDate } from '../lib/format'
 import StatusTracker from '../components/StatusTracker'
@@ -31,9 +31,11 @@ export default function BorrowerDashboard({ grants }) {
       getChecklist(active).catch(() => null),
       listConditions(active).catch(() => []),
       listMessages(active).catch(() => []),
+      // Task pilot (flag): fetch real borrower tasks; safe fallback to null when off/unavailable.
+      flag('taskPilot') ? listTasks(active).then((r) => r?.tasks || []).catch(() => null) : Promise.resolve(null),
     ])
-      .then(([status, checklist, conditions, messages]) => {
-        if (alive) setData({ status, checklist, conditions, messages })
+      .then(([status, checklist, conditions, messages, tasks]) => {
+        if (alive) setData({ status, checklist, conditions, messages, tasks })
       })
       .catch((err) => { if (alive) setError(err?.message || 'Could not load your loan.') })
       .finally(() => { if (alive) setLoading(false) })
@@ -44,7 +46,7 @@ export default function BorrowerDashboard({ grants }) {
   if (error) return <Alert kind="error">{error}</Alert>
   if (!data) return null
 
-  const { status, checklist, conditions, messages } = data
+  const { status, checklist, conditions, messages, tasks } = data
   const openConditions = (conditions || []).filter((c) => c.status !== 'cleared')
   const reloadMessages = () =>
     listMessages(active).then((m) => setData((d) => ({ ...d, messages: m }))).catch(() => {})
@@ -60,9 +62,10 @@ export default function BorrowerDashboard({ grants }) {
         )}
       </div>
 
-      {/* Phase 1B (flag-gated): borrower "Needs your attention" at the very top. */}
-      {flag('borrowerWorkspaceV2') && (
-        <NeedsAttention loanFileId={active} checklistItems={checklist?.items || []} conditions={conditions || []} />
+      {/* Phase 1B/1C (flag-gated): borrower "Needs your attention" at the very top. When the
+          task pilot is on, it renders real tasks; otherwise it derives from checklist+conditions. */}
+      {(flag('borrowerWorkspaceV2') || flag('taskPilot')) && (
+        <NeedsAttention loanFileId={active} checklistItems={checklist?.items || []} conditions={conditions || []} tasks={tasks} />
       )}
 
       <div className="card" style={{ overflow: 'hidden' }}>

@@ -54,8 +54,8 @@ export const getChecklist = (loanFileId) =>
 export const getUploadUrl = (loanFileId, docKey) =>
   call('portal-doc-upload-url', { method: 'POST', body: { loanFileId, docKey } })
 
-export const completeUpload = (documentId) =>
-  call('portal-doc-complete', { method: 'POST', body: { documentId } })
+export const completeUpload = (documentId, taskId) =>
+  call('portal-doc-complete', { method: 'POST', body: { documentId, ...(taskId ? { taskId } : {}) } })
 
 // ── Loan officer / owner ─────────────────────────────────────────────────────
 export const getReviewQueue = () => call('portal-review-queue')
@@ -94,6 +94,16 @@ export const teamRemove = (memberUserId) =>
 export const saveSettings = (data) =>
   call('portal-settings-set', { method: 'POST', body: { data } })
 
+// ── Task pilot (Phase 1C) ────────────────────────────────────────────────────
+export const listTasks = (loanFileId) =>
+  call(`portal-task-list?loanFileId=${encodeURIComponent(loanFileId)}`)
+export const getTaskDetail = (taskId) =>
+  call(`portal-task-detail?taskId=${encodeURIComponent(taskId)}`)
+export const createTask = (payload) =>
+  call('portal-task-create', { method: 'POST', body: payload })
+export const transitionTask = (taskId, action, extra = {}) =>
+  call('portal-task-transition', { method: 'POST', body: { taskId, action, ...extra } })
+
 // ── Direct RLS reads the gateway doesn't expose (borrower/co-borrower only) ───
 // portal_access is readable by the user (own-grants RLS policy) — this is how the app
 // discovers which loan files to show and at what visibility.
@@ -130,13 +140,15 @@ export async function listMessages(loanFileId) {
 }
 
 // ── Upload a file to a server-minted signed URL, then finalize ───────────────
-export async function uploadDocument(loanFileId, docKey, file) {
+export async function uploadDocument(loanFileId, docKey, file, taskId) {
   const signed = await getUploadUrl(loanFileId, docKey)
   const { error } = await supabase()
     .storage.from(signed.bucket)
     .uploadToSignedUrl(signed.path, signed.token, file)
   if (error) throw new ApiError(error.message || 'Upload failed', 500)
-  return completeUpload(signed.documentId)
+  // taskId links the finalize to a pilot task (transitions it to submitted). Only after the
+  // upload above SUCCEEDS — a failed upload throws before this and never moves the task.
+  return completeUpload(signed.documentId, taskId)
 }
 
 // ── Lead intake (borrower application + realtor buyer submit) ─────────────────

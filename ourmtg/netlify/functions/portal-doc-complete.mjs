@@ -20,9 +20,11 @@
 
 import { admin, isConfigured } from './_lib/supabase.mjs'
 import {
-  authUser, json, preflight, loadLoanFile, resolveAccess, canSeeFinancials, logAccess,
+  authUser, json, preflight, loadLoanFile, resolveAccess, canSeeFinancials, logAccess, randomToken,
 } from './_lib/portal.mjs'
 import { sendPlatformEmail, brandedEmail, esc } from './_lib/mailer.mjs'
+import { resolveOrg, actorTypeFor } from './_lib/orgAccess.mjs'
+import { createTaskRepo } from './_lib/taskRepo.mjs'
 
 const BUCKET = 'ourmtg-docs'
 const OURMTG_URL = (process.env.OURMTG_URL || 'https://ourmtg.com').replace(/\/$/, '')
@@ -99,6 +101,33 @@ export default async (req) => {
     portalUser: auth.user.id, loanFileId: doc.loan_file_id, action: 'upload_doc_complete', target: doc.doc_key, req,
   })
 
+  // ── Document ↔ task linking (task pilot). ONLY after finalize succeeded (status is now
+  // 'uploaded'), transition the linked borrower task to 'submitted' and link this document.
+  // An upload failure earlier returned before this point, so the task never moves on failure.
+  let taskTransition = null
+  const taskId = String(body.taskId || '').trim()
+  if (taskId) {
+    try {
+      const org = await resolveOrg(svc, auth.user.id)
+      const repo = createTaskRepo({ db: svc })
+      const task = await repo.getTask(taskId)
+      if (org && task && task.loan_file_id === doc.loan_file_id && org.organization_id === task.organization_id
+          && ['borrower', 'coborrower'].includes(task.responsible_party_type)) {
+        const actor = { type: actorTypeFor(access, access.teamRole), id: auth.user.id }
+        taskTransition = await repo.transition({
+          task, action: 'submit', actor, linkedDocumentId: doc.id,
+          correlationId: await randomToken(8),
+          idempotencyKey: `submit:${taskId}:${doc.id}`, at: new Date().toISOString(),
+        })
+      } else {
+        taskTransition = { ok: false, error: 'task_not_linkable' }
+      }
+    } catch (e) {
+      console.warn('[portal-doc-complete] task submit (non-fatal):', e.message)
+      taskTransition = { ok: false, error: 'task_update_failed' }
+    }
+  }
+
   // ── Notify the loan officer (owner) — fail-soft ─────────────────────────────
   try {
     const { data: ownerData } = await svc.auth.admin.getUserById(doc.owner_user_id)
@@ -141,5 +170,5 @@ export default async (req) => {
     }
   } catch (e) { console.warn('[portal-doc-complete] borrower confirm (non-fatal):', e.message) }
 
-  return json({ ok: true, documentId: doc.id, status: 'uploaded' })
+  return json({ ok: true, documentId: doc.id, status: 'uploaded', ...(taskTransition ? { taskTransition } : {}) })
 }
