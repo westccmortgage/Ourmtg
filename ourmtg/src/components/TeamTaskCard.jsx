@@ -1,7 +1,7 @@
 // Phase 1C loan-team task pilot. Creates one exact document task for a verified
 // borrower audience and renders only lifecycle-valid review actions.
 import { useEffect, useState, useCallback } from 'react'
-import { listTasks, createTask, transitionTask } from '../lib/api'
+import { listTasks, createTask, transitionTask, getFileDetail } from '../lib/api'
 import { taskStatusLabel } from '../lib/taskLabels'
 import { teamActionsForTask, actionNeedsBorrowerReason } from '../lib/taskUi'
 import { getOrCreatePendingOperation, readPendingOperation, settlePendingOperation } from '../lib/pendingOps'
@@ -12,18 +12,23 @@ const blankForm = {
   requiredDocumentType: '', requiredDocumentId: '', audience: 'shared',
 }
 
-export default function TeamTaskCard({ loanFileId, participants = [], documents = [] }) {
+export default function TeamTaskCard({ loanFileId }) {
   const [tasks, setTasks] = useState(null)
+  const [participants, setParticipants] = useState([])
+  const [documents, setDocuments] = useState([])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [form, setForm] = useState(blankForm)
 
-  const load = useCallback(() => listTasks(loanFileId)
-    .then((r) => setTasks(r?.tasks || []))
+  const load = useCallback(() => Promise.all([listTasks(loanFileId), getFileDetail(loanFileId)])
+    .then(([taskData, detail]) => {
+      setTasks(taskData?.tasks || [])
+      setParticipants(detail?.participants || [])
+      setDocuments(detail?.documents || [])
+    })
     .catch((e) => setError(e?.message || 'Could not load tasks.')), [loanFileId])
   useEffect(() => { load() }, [load])
 
-  // Refresh recovery: restore the material payload of an ambiguous create request.
   useEffect(() => {
     const pending = readPendingOperation(`task-create:${loanFileId}`)
     if (pending?.material?.form) setForm((current) => ({ ...current, ...pending.material.form }))
