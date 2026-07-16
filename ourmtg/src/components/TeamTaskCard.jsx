@@ -56,10 +56,11 @@ export default function TeamTaskCard({ loanFileId }) {
       responsibleUserId: form.audience === 'shared' ? null : form.audience,
     }
     const scope = `task-create:${loanFileId}`
-    const op = getOrCreatePendingOperation(scope, { form, payload })
+    const op = getOrCreatePendingOperation(scope, { form, payload }, undefined, { reuseExisting: true })
+    const material = op.material?.payload || payload
     setBusy(true); setError('')
     try {
-      await createTask({ ...payload, idempotencyKey: op.idempotencyKey })
+      await createTask({ ...material, idempotencyKey: op.idempotencyKey })
       settlePendingOperation(scope, op, null)
       setForm(blankForm)
       await load()
@@ -82,10 +83,11 @@ export default function TeamTaskCard({ loanFileId }) {
       ...(borrowerVisibleReason ? { borrowerVisibleReason } : {}),
     }
     const scope = `task-transition:${task.id}:${action}`
-    const op = getOrCreatePendingOperation(scope, payload)
+    const op = getOrCreatePendingOperation(scope, payload, undefined, { reuseExisting: true })
+    const material = op.material || payload
     setBusy(true); setError('')
     try {
-      await transitionTask(task.id, action, { ...payload, idempotencyKey: op.idempotencyKey })
+      await transitionTask(material.taskId, material.action, { ...material, idempotencyKey: op.idempotencyKey })
       settlePendingOperation(scope, op, null)
       await load()
     } catch (err) {
