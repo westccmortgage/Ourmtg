@@ -5,7 +5,7 @@
 import { admin, isConfigured } from './_lib/supabase.mjs'
 import { authUser, json, preflight, loadLoanFile, resolveAccess, canSeeFinancials, logAccess, randomToken, storageDocPath } from './_lib/portal.mjs'
 import { isValidDocKey, labelForDocKey } from './_lib/checklist.mjs'
-import { validateUpload } from './_lib/upload-policy.mjs'
+import { validateUpload, hasDangerousExtension } from './_lib/upload-policy.mjs'
 import { readJsonBody, isUuid, docTaskLinkDecision } from './_lib/requestGuard.mjs'
 import { taskPilotEnabled } from './_lib/featureFlags.mjs'
 import { resolveTaskContext } from './_lib/orgAccess.mjs'
@@ -28,16 +28,15 @@ export default async (req) => {
   if (!docKey) return json({ ok: false, error: 'Missing docKey' }, 400)
   if (body.documentId != null && !isUuid(body.documentId)) return json({ ok: false, error: 'Invalid documentId' }, 400)
 
-  if (body.contentType != null || body.filename != null) {
+  if (body.filename && hasDangerousExtension(body.filename)) return json({ ok: false, error: 'This file type is not allowed' }, 400)
+  if (body.contentType) {
     const v = validateUpload({ contentType: body.contentType, filename: body.filename })
     if (!v.ok) return json({ ok: false, error: v.error }, 400)
   }
 
   const route = docTaskLinkDecision(body.taskId, taskPilotEnabled())
   if (route.mode === 'error') return json({ ok: false, error: route.error }, route.status)
-  if (route.mode === 'task' && !isUuid(body.documentId)) {
-    return json({ ok: false, error: 'A task upload requires the exact documentId' }, 400)
-  }
+  if (route.mode === 'task' && !isUuid(body.documentId)) return json({ ok: false, error: 'A task upload requires the exact documentId' }, 400)
 
   const svc = admin()
   let loanFile, access
