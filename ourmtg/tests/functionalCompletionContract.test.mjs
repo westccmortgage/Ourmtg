@@ -37,6 +37,14 @@ test('database create authority validates organization, participant and exact do
   assert.match(sql, /loan_tasks_audience_check/)
 })
 
+test('task-linked signed upload is bound to task and exact document before storage mutation', async () => {
+  const src = await read('netlify/functions/portal-doc-upload-url.mjs')
+  assert.match(src, /docTaskLinkDecision\(body\.taskId/)
+  assert.match(src, /task\.required_document_id !== existing\.id/)
+  assert.match(src, /task\.status !== 'in_progress'/)
+  assert.match(src, /repo\.borrowerCanSeeTask/)
+})
+
 test('task-linked finalize is request-guarded and invokes no delivery provider', async () => {
   const src = await read('netlify/functions/portal-doc-complete.mjs')
   assert.match(src, /readJsonBody\(req\)/)
