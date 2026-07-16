@@ -96,7 +96,11 @@ export default function TeamTaskCard({ loanFileId }) {
     } finally { setBusy(false) }
   }
 
-  const availableDocs = documents.filter((d) => ['requested', 'rejected'].includes(d.status))
+  const selectedParticipant = participants.find((p) => p.id === form.audience) || null
+  const availableDocs = documents.filter((d) => {
+    if (!['requested', 'rejected'].includes(d.status)) return false
+    return form.audience === 'shared' || d.who === selectedParticipant?.visibility
+  })
 
   return (
     <div className="card">
@@ -112,7 +116,7 @@ export default function TeamTaskCard({ loanFileId }) {
           <input value={form.internalRequirement} onChange={(e) => setForm({ ...form, internalRequirement: e.target.value })} /></div>
         <div className="grid2">
           <div className="field"><label>Borrower audience</label>
-            <select value={form.audience} onChange={(e) => setForm({ ...form, audience: e.target.value })}>
+            <select value={form.audience} onChange={(e) => setForm({ ...form, audience: e.target.value, requiredDocumentId: '' })}>
               <option value="shared">All approved borrowers</option>
               {participants.map((p) => (
                 <option key={p.id} value={p.id}>{p.name || p.email || p.id.slice(0, 8)} — {p.visibility === 'coborrower' ? 'Co-borrower' : 'Borrower'}</option>
