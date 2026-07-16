@@ -49,6 +49,67 @@ alter table public.loan_files
   add column if not exists organization_id uuid references public.organizations(id) on delete restrict;
 create index if not exists loan_files_org on public.loan_files (organization_id);
 
+-- Deterministic single-organization pilot backfill. This code is intentionally part of the
+-- reviewable migration so an isolated-branch apply has a reproducible result, not an operator-
+-- invented sequence. A conflicting WCC display name under another slug stops the migration.
+do $$
+begin
+  if exists (
+    select 1 from public.organizations
+    where display_name = 'West Coast Capital Mortgage'
+      and slug <> 'west-coast-capital-mortgage'
+  ) then
+    raise exception 'organization_preflight_conflict';
+  end if;
+end $$;
+
+insert into public.organizations (slug, legal_name, display_name)
+values ('west-coast-capital-mortgage', 'West Coast Capital Mortgage Inc.', 'West Coast Capital Mortgage')
+on conflict (slug) do update
+  set legal_name = excluded.legal_name,
+      display_name = excluded.display_name,
+      status = 'active',
+      archived_at = null;
+
+update public.loan_files lf
+set organization_id = o.id
+from public.organizations o
+where o.slug = 'west-coast-capital-mortgage'
+  and lf.organization_id is null;
+
+insert into public.organization_members (organization_id, user_id, role, status)
+select lf.organization_id, lf.owner_user_id, 'loan_officer', 'active'
+from public.loan_files lf
+where lf.organization_id is not null
+on conflict (organization_id, user_id) do update
+  set status = 'active',
+      role = case
+        when public.organization_members.role in ('owner','admin') then public.organization_members.role
+        else 'loan_officer'
+      end;
+
+do $$
+declare v_target uuid;
+begin
+  select id into strict v_target from public.organizations where slug = 'west-coast-capital-mortgage';
+  if exists (select 1 from public.loan_files where organization_id is distinct from v_target) then
+    raise exception 'loan_file_organization_backfill_incomplete';
+  end if;
+  if exists (
+    select 1 from public.loan_files lf
+    where not exists (
+      select 1 from public.organization_members m
+      where m.organization_id = lf.organization_id
+        and m.user_id = lf.owner_user_id
+        and m.status = 'active'
+    )
+  ) then
+    raise exception 'owner_membership_backfill_incomplete';
+  end if;
+end $$;
+
+alter table public.loan_files alter column organization_id set not null;
+
 create table if not exists public.loan_events (
   id               uuid primary key default gen_random_uuid(),
   organization_id  uuid not null references public.organizations(id) on delete restrict,
@@ -80,12 +141,16 @@ create table if not exists public.loan_tasks (
   id                     uuid primary key default gen_random_uuid(),
   organization_id        uuid not null references public.organizations(id) on delete restrict,
   loan_file_id           uuid not null references public.loan_files(id) on delete restrict,
-  task_type              text not null,
+  task_type              text not null
+                           check (task_type in ('document_request','document_reupload','condition','signature',
+                                                'explanation','appointment','missing_page','information_request',
+                                                'internal_review','other')),
   title                  text not null,
   borrower_explanation   text,
   internal_requirement   text,
   borrower_visible_status_reason text,
-  responsible_party_type text not null check (responsible_party_type in ('borrower','coborrower','loan_team','third_party','system')),
+  responsible_party_type text not null
+                           check (responsible_party_type in ('borrower','coborrower','loan_team','third_party','system')),
   responsible_user_id    uuid references auth.users(id) on delete restrict,
   shared_with_borrowers  boolean not null default false,
   required_document_id   uuid references public.loan_documents(id) on delete restrict,
@@ -204,6 +269,7 @@ create or replace function public.ourmtg_task_create(
 declare
   v_task_id uuid; v_existing public.loan_events; v_loan public.loan_files;
   v_doc public.loan_documents; v_party text; v_now timestamptz := coalesce(p_at, now());
+  v_recipient_role text;
 begin
   if p_idempotency_key is null or p_request_hash is null then raise exception 'idempotency_required'; end if;
   select * into v_existing from public.loan_events
@@ -212,6 +278,12 @@ begin
     if v_existing.request_hash is distinct from p_request_hash then raise exception 'idempotency_conflict'; end if;
     return jsonb_build_object('ok',true,'deduped',true,'task_id',v_existing.source_record_id::uuid,
       'status',v_existing.new_state->>'status','revision',(v_existing.new_state->>'revision')::integer);
+  end if;
+
+  if p_actor_type not in ('loan_officer','processor','assistant')
+     or p_actor_id is null or p_created_by is distinct from p_actor_id
+     or p_source_system <> 'ourmtg' then
+    raise exception 'forbidden_action';
   end if;
 
   select * into v_loan from public.loan_files where id=p_loan_file_id for share;
@@ -225,12 +297,14 @@ begin
     if not exists (select 1 from public.portal_access pa where pa.loan_file_id=p_loan_file_id
                    and pa.visibility in ('borrower','coborrower')) then raise exception 'participant_invalid'; end if;
     v_party := 'borrower';
+    v_recipient_role := 'borrower_group';
   else
     if p_responsible_user_id is null then raise exception 'audience_invalid'; end if;
     select pa.visibility into v_party from public.portal_access pa
       where pa.loan_file_id=p_loan_file_id and pa.portal_user=p_responsible_user_id
         and pa.visibility in ('borrower','coborrower') limit 1;
     if v_party is null then raise exception 'participant_invalid'; end if;
+    v_recipient_role := v_party;
   end if;
 
   if p_task_type in ('document_request','document_reupload','missing_page') then
@@ -265,7 +339,7 @@ begin
     source_record_id,correlation_id,idempotency_key,metadata,occurred_at)
     values (p_organization_id,p_loan_file_id,'notification.queued','system',p_source_system,
       v_task_id::text,p_correlation_id,'intent:'||p_idempotency_key,
-      jsonb_build_object('intent','borrower_task_created','recipient_role','borrower','task_id',v_task_id::text),v_now);
+      jsonb_build_object('intent','borrower_task_created','recipient_role',v_recipient_role,'task_id',v_task_id::text),v_now);
   return jsonb_build_object('ok',true,'deduped',false,'task_id',v_task_id,'status','assigned','revision',1);
 exception when unique_violation then
   select * into v_existing from public.loan_events
@@ -286,7 +360,7 @@ create or replace function public.ourmtg_task_transition(
 declare
   v_task public.loan_tasks; v_loan public.loan_files; v_existing public.loan_events;
   v_from text; v_to text; v_evt text; v_intent text; v_new_revision integer;
-  v_now timestamptz := coalesce(p_at,now());
+  v_now timestamptz := coalesce(p_at,now()); v_recipient_role text;
 begin
   if p_idempotency_key is null or p_request_hash is null then raise exception 'idempotency_required'; end if;
   select * into v_existing from public.loan_events
@@ -298,6 +372,7 @@ begin
       'revision',(v_existing.new_state->>'revision')::integer);
   end if;
 
+  if p_source_system <> 'ourmtg' then raise exception 'forbidden_action'; end if;
   select * into v_task from public.loan_tasks where id=p_task_id for update;
   if not found then raise exception 'task_not_found'; end if;
   select * into v_loan from public.loan_files where id=v_task.loan_file_id for share;
@@ -317,6 +392,8 @@ begin
     if not exists (select 1 from public.portal_access pa where pa.loan_file_id=v_task.loan_file_id
                    and pa.portal_user=p_actor_id and pa.visibility=p_actor_type) then raise exception 'not_participant'; end if;
     if not (v_task.shared_with_borrowers or v_task.responsible_user_id=p_actor_id) then raise exception 'not_participant'; end if;
+  else
+    raise exception 'forbidden_action';
   end if;
 
   if v_to='accepted' and v_task.task_type in ('document_request','document_reupload','condition','signature')
@@ -352,12 +429,14 @@ begin
   v_intent := case p_action when 'reject' then 'borrower_task_rejected'
                  when 'requestMoreInfo' then 'borrower_task_more_information_needed'
                  when 'reopen' then 'borrower_task_reopened' else null end;
+  v_recipient_role := case when v_task.shared_with_borrowers then 'borrower_group'
+                           else v_task.responsible_party_type end;
   if v_intent is not null then
     insert into public.loan_events(organization_id,loan_file_id,event_type,actor_type,source_system,
       source_record_id,correlation_id,idempotency_key,metadata,occurred_at)
       values (p_organization_id,v_task.loan_file_id,'notification.queued','system',p_source_system,
         p_task_id::text,p_correlation_id,'intent:'||p_idempotency_key,
-        jsonb_build_object('intent',v_intent,'recipient_role','borrower','task_id',p_task_id::text),v_now);
+        jsonb_build_object('intent',v_intent,'recipient_role',v_recipient_role,'task_id',p_task_id::text),v_now);
   end if;
   return jsonb_build_object('ok',true,'deduped',false,'task_id',p_task_id,
     'from',v_from,'to',v_to,'revision',v_new_revision);
@@ -392,6 +471,9 @@ begin
       'to',v_existing.new_state->>'status','revision',(v_existing.new_state->>'revision')::integer);
   end if;
 
+  if p_source_system <> 'ourmtg' or p_actor_type not in ('borrower','coborrower') then
+    raise exception 'forbidden_action';
+  end if;
   select * into v_doc from public.loan_documents where id=p_document_id for update;
   if not found then raise exception 'document_not_found'; end if;
   select * into v_task from public.loan_tasks where id=p_task_id for update;
@@ -407,10 +489,11 @@ begin
   select pa.visibility into v_visibility from public.portal_access pa
     where pa.loan_file_id=v_task.loan_file_id and pa.portal_user=p_actor_user_id
       and pa.visibility in ('borrower','coborrower') limit 1;
-  if v_visibility is null then raise exception 'not_participant'; end if;
+  if v_visibility is null or v_visibility <> p_actor_type then raise exception 'not_participant'; end if;
   if not (v_task.shared_with_borrowers or
           (v_task.responsible_user_id=p_actor_user_id and v_task.responsible_party_type=v_visibility))
     then raise exception 'not_participant'; end if;
+  if not v_task.shared_with_borrowers and v_doc.who <> v_visibility then raise exception 'document_binding_mismatch'; end if;
 
   v_new_revision := v_task.revision+1;
   update public.loan_documents set status='uploaded', uploaded_at=v_now where id=p_document_id;
@@ -465,26 +548,15 @@ grant execute on function public.ourmtg_task_transition(uuid,text,integer,text,u
 revoke all on function public.ourmtg_document_finalize_submit(uuid,uuid,uuid,uuid,text,integer,text,text,text,text,timestamptz) from public, anon, authenticated;
 grant execute on function public.ourmtg_document_finalize_submit(uuid,uuid,uuid,uuid,text,integer,text,text,text,text,timestamptz) to service_role;
 
--- Deterministic organization preflight/backfill (run deliberately on an approved isolated branch):
--- 1. Stop on a conflicting display name under another slug.
--- 2. Upsert slug west-coast-capital-mortgage.
--- 3. Backfill owner membership in that exact organization.
--- 4. Backfill loan_files.organization_id.
--- 5. Require zero files outside the target org, zero owners without target-org membership,
---    zero task participants without matching portal_access, and zero audience/document conflicts.
---
--- with target as (select id from organizations where slug='west-coast-capital-mortgage')
--- select count(*) from loan_files where organization_id is distinct from (select id from target); -- 0
--- with target as (select id from organizations where slug='west-coast-capital-mortgage')
--- select count(*) from loan_files lf where lf.organization_id=(select id from target)
---   and not exists (select 1 from organization_members m where m.organization_id=lf.organization_id
---                   and m.user_id=lf.owner_user_id and m.status='active'); -- 0
+-- Post-apply acceptance queries (isolated branch only; migration remains unapplied here):
+-- select count(*) from loan_files where organization_id is null; -- 0
 -- select count(*) from loan_tasks t where not t.shared_with_borrowers and
 --   not exists (select 1 from portal_access pa where pa.loan_file_id=t.loan_file_id
 --               and pa.portal_user=t.responsible_user_id and pa.visibility=t.responsible_party_type); -- 0
 -- select count(*) from loan_tasks t left join loan_documents d on d.id=t.required_document_id
 --   where t.task_type in ('document_request','document_reupload','missing_page')
 --     and (d.id is null or d.loan_file_id<>t.loan_file_id); -- 0
-
+-- select has_table_privilege('authenticated','public.loan_tasks','SELECT'); -- false
+--
 -- Rollback is intentionally manual and dependency-ordered. Audit rows must be exported/retained;
 -- do not hard-delete organizations/files/tasks with operational history.
