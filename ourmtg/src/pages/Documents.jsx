@@ -8,7 +8,7 @@ import { shortDate } from '../lib/format'
 import { borrowerPreparationActions } from '../lib/taskUi'
 import { taskStatusLabel } from '../lib/taskLabels'
 import { useLang } from '../lib/i18n'
-import { getOrCreatePendingOperation, readPendingOperation, settlePendingOperation } from '../lib/pendingOps'
+import { getOrCreatePendingOperation, readPendingOperation, settlePendingOperation, isAmbiguousFailure } from '../lib/pendingOps'
 import { Alert, Spinner, StatusChip } from '../components/ui'
 
 async function transitionBorrowerTask(task, action) {
@@ -38,20 +38,38 @@ function DocItem({ loanFileId, item, onDone, task }) {
     if (file.size > 25 * 1024 * 1024) { setError('That file is over 25 MB — please upload a smaller file.'); return }
     if (task && task.status !== 'in_progress') { setError('This task is not ready for upload. Refresh and try again.'); return }
 
-    let operation = null
-    let scope = null
-    if (task) {
-      const material = {
-        taskId: task.id,
-        documentId: item.documentId,
-        expectedRevision: Number(task.revision || 0),
-      }
-      scope = `task-finalize:${task.id}`
-      operation = getOrCreatePendingOperation(scope, material, undefined, { reuseExisting: true })
-    }
-
     setError(''); setBusy(true)
+    let scope = null
+    let operation = null
     try {
+      if (task) {
+        scope = `task-finalize:${task.id}`
+        const existing = readPendingOperation(scope)
+        if (existing?.material?.documentId) {
+          try {
+            await completeUpload(existing.material.documentId, {
+              taskId: existing.material.taskId,
+              expectedRevision: existing.material.expectedRevision,
+              idempotencyKey: existing.idempotencyKey,
+            })
+            settlePendingOperation(scope, existing, null)
+            await onDone()
+            return
+          } catch (retryError) {
+            settlePendingOperation(scope, existing, retryError)
+            const uploadMissing = retryError?.status === 409 && /upload not found/i.test(String(retryError?.message || ''))
+            if (isAmbiguousFailure(retryError) || !uploadMissing) throw retryError
+          }
+        }
+
+        const material = {
+          taskId: task.id,
+          documentId: item.documentId,
+          expectedRevision: Number(task.revision || 0),
+        }
+        operation = getOrCreatePendingOperation(scope, material, undefined, { reuseExisting: true })
+      }
+
       const material = operation?.material
       await uploadDocument(loanFileId, item.docKey, file, task ? {
         taskId: material.taskId,
@@ -62,7 +80,7 @@ function DocItem({ loanFileId, item, onDone, task }) {
       if (task) settlePendingOperation(scope, operation, null)
       await onDone()
     } catch (err) {
-      if (task) settlePendingOperation(scope, operation, err)
+      if (task && operation) settlePendingOperation(scope, operation, err)
       setError(err?.message || 'Upload failed. Please try again.')
     } finally { setBusy(false) }
   }
@@ -127,8 +145,6 @@ export default function Documents() {
     return () => { alive = false }
   }, [load])
 
-  // Lost-response recovery. If the server already committed the finalize, the refreshed task
-  // clears the persisted operation; otherwise the exact same key/revision is retried.
   useEffect(() => {
     if (!prepared || !taskId || !task) return
     const scope = `task-finalize:${task.id}`
