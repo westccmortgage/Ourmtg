@@ -17,11 +17,8 @@ async function call(path, { method = 'GET', body, auth = true } = {}) {
   const headers = { 'content-type': 'application/json' }
   if (auth) Object.assign(headers, await authHeader())
   let res
-  try {
-    res = await fetch(`${API_BASE}/${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined })
-  } catch {
-    throw new ApiError('Network error — check your connection and try again.', 0)
-  }
+  try { res = await fetch(`${API_BASE}/${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined }) }
+  catch { throw new ApiError('Network error — check your connection and try again.', 0) }
   let data = null
   try { data = await res.json() } catch { /* non-JSON */ }
   if (!res.ok || (data && data.ok === false)) throw new ApiError(data?.error || `Request failed (${res.status})`, res.status)
@@ -31,8 +28,10 @@ async function call(path, { method = 'GET', body, auth = true } = {}) {
 export const acceptInvite = (token) => call('portal-invite-accept', { method: 'POST', body: { token } })
 export const getStatus = (loanFileId) => call(`portal-status?loanFileId=${encodeURIComponent(loanFileId)}`)
 export const getChecklist = (loanFileId) => call(`portal-checklist?loanFileId=${encodeURIComponent(loanFileId)}`)
-export const getUploadUrl = (loanFileId, docKey) => call('portal-doc-upload-url', { method: 'POST', body: { loanFileId, docKey } })
-
+export const getUploadUrl = (loanFileId, docKey, options = {}) => call('portal-doc-upload-url', {
+  method: 'POST',
+  body: { loanFileId, docKey, ...options },
+})
 export const completeUpload = (documentId, taskContext = null) => call('portal-doc-complete', {
   method: 'POST',
   body: {
@@ -87,10 +86,12 @@ export async function listMessages(loanFileId) {
   return data || []
 }
 
-// Upload to the server-minted private path, then finalize. A task-linked operation carries
-// the exact required document id, expected task revision and stable idempotency key.
 export async function uploadDocument(loanFileId, docKey, file, taskContext = null) {
-  const signed = await getUploadUrl(loanFileId, docKey)
+  const signed = await getUploadUrl(loanFileId, docKey, {
+    contentType: file.type || null,
+    filename: file.name || null,
+    ...(taskContext ? { taskId: taskContext.taskId, documentId: taskContext.requiredDocumentId } : {}),
+  })
   if (taskContext?.requiredDocumentId && signed.documentId !== taskContext.requiredDocumentId) {
     throw new ApiError('This upload does not match the requested task document.', 409)
   }
