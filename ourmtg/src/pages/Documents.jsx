@@ -6,15 +6,18 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { getChecklist, uploadDocument, getTaskDetail, transitionTask, completeUpload } from '../lib/api'
 import { shortDate } from '../lib/format'
 import { borrowerPreparationActions } from '../lib/taskUi'
+import { taskStatusLabel } from '../lib/taskLabels'
+import { useLang } from '../lib/i18n'
 import { getOrCreatePendingOperation, readPendingOperation, settlePendingOperation } from '../lib/pendingOps'
 import { Alert, Spinner, StatusChip } from '../components/ui'
 
 async function transitionBorrowerTask(task, action) {
   const payload = { taskId: task.id, action, expectedRevision: Number(task.revision || 0) }
   const scope = `task-transition:${task.id}:${action}`
-  const op = getOrCreatePendingOperation(scope, payload)
+  const op = getOrCreatePendingOperation(scope, payload, undefined, { reuseExisting: true })
+  const material = op.material || payload
   try {
-    const result = await transitionTask(task.id, action, { ...payload, idempotencyKey: op.idempotencyKey })
+    const result = await transitionTask(material.taskId, material.action, { ...material, idempotencyKey: op.idempotencyKey })
     settlePendingOperation(scope, op, null)
     return { ...task, status: result.to, revision: result.revision }
   } catch (error) {
@@ -44,15 +47,16 @@ function DocItem({ loanFileId, item, onDone, task }) {
         expectedRevision: Number(task.revision || 0),
       }
       scope = `task-finalize:${task.id}`
-      operation = getOrCreatePendingOperation(scope, material)
+      operation = getOrCreatePendingOperation(scope, material, undefined, { reuseExisting: true })
     }
 
     setError(''); setBusy(true)
     try {
+      const material = operation?.material
       await uploadDocument(loanFileId, item.docKey, file, task ? {
-        taskId: task.id,
-        requiredDocumentId: item.documentId,
-        expectedRevision: task.revision,
+        taskId: material.taskId,
+        requiredDocumentId: material.documentId,
+        expectedRevision: material.expectedRevision,
         idempotencyKey: operation.idempotencyKey,
       } : null)
       if (task) settlePendingOperation(scope, operation, null)
@@ -89,6 +93,7 @@ function DocItem({ loanFileId, item, onDone, task }) {
 export default function Documents() {
   const { loanFileId } = useParams()
   const [params] = useSearchParams()
+  const { lang } = useLang()
   const taskId = params.get('task') || null
   const [data, setData] = useState(null)
   const [task, setTask] = useState(null)
@@ -122,13 +127,18 @@ export default function Documents() {
     return () => { alive = false }
   }, [load])
 
-  // Lost-response recovery: if the upload object already exists, retry only the same finalize
-  // operation before asking the borrower to upload again.
+  // Lost-response recovery. If the server already committed the finalize, the refreshed task
+  // clears the persisted operation; otherwise the exact same key/revision is retried.
   useEffect(() => {
-    if (!prepared || !taskId || !task || task.status !== 'in_progress') return
+    if (!prepared || !taskId || !task) return
     const scope = `task-finalize:${task.id}`
     const pending = readPendingOperation(scope)
     if (!pending?.material?.documentId) return
+    if (['submitted', 'prechecked', 'team_review', 'accepted', 'completed'].includes(task.status)) {
+      settlePendingOperation(scope, pending, null)
+      return
+    }
+    if (task.status !== 'in_progress') return
     completeUpload(pending.material.documentId, {
       taskId: task.id,
       expectedRevision: pending.material.expectedRevision,
@@ -158,7 +168,7 @@ export default function Documents() {
       <Link to="/portal" className="backlink">← Back to my loan</Link>
       <div className="spread"><h1 className="mb0">Your documents</h1><span className="chip">{data.uploaded} of {data.total} done</span></div>
       <p className="muted">Snap a photo or upload a file — no scanner needed. Everything is encrypted and private to your loan team.</p>
-      {task && <p className="fileno">Task: {task.title} · {task.status.replaceAll('_', ' ')}</p>}
+      {task && <p className="fileno">Task: {task.title} · {taskStatusLabel(task.status, lang)}</p>}
 
       {borrowerItems.length > 0 && <div className="card">
         <div className="card-head"><h2>Your items</h2></div>
