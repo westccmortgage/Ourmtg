@@ -8,27 +8,17 @@ const SOURCE_SYSTEM = 'ourmtg'
 export function scrubTaskForBorrower(t) {
   if (!t) return t
   return {
-    id: t.id,
-    loan_file_id: t.loan_file_id,
-    task_type: t.task_type,
-    title: t.title,
+    id: t.id, loan_file_id: t.loan_file_id, task_type: t.task_type, title: t.title,
     borrower_explanation: t.borrower_explanation,
     borrower_visible_status_reason: t.borrower_visible_status_reason || null,
-    status: t.status,
-    revision: Number(t.revision || 0),
-    priority: t.priority,
-    is_blocking: t.is_blocking,
-    due_at: t.due_at,
+    status: t.status, revision: Number(t.revision || 0), priority: t.priority,
+    is_blocking: t.is_blocking, due_at: t.due_at,
     required_document_id: t.required_document_id || null,
     required_document_type: t.required_document_type,
     linked_document_id: t.linked_document_id,
-    viewed_at: t.viewed_at,
-    started_at: t.started_at,
-    submitted_at: t.submitted_at,
-    completed_at: t.completed_at,
-    reopened_at: t.reopened_at,
-    created_at: t.created_at,
-    updated_at: t.updated_at,
+    viewed_at: t.viewed_at, started_at: t.started_at, submitted_at: t.submitted_at,
+    completed_at: t.completed_at, reopened_at: t.reopened_at,
+    created_at: t.created_at, updated_at: t.updated_at,
   }
 }
 
@@ -79,27 +69,18 @@ export function createTaskRepo({ db }) {
     let data, error
     try {
       ({ data, error } = await db.rpc('ourmtg_task_create', {
-        p_organization_id: input.organization_id,
-        p_loan_file_id: input.loan_file_id,
-        p_task_type: input.task_type || 'document_request',
-        p_title: input.title,
+        p_organization_id: input.organization_id, p_loan_file_id: input.loan_file_id,
+        p_task_type: input.task_type || 'document_request', p_title: input.title,
         p_borrower_explanation: input.borrower_explanation || null,
         p_internal_requirement: input.internal_requirement || null,
         p_responsible_user_id: input.responsible_user_id || null,
         p_shared_with_borrowers: !!input.shared_with_borrowers,
-        p_priority: input.priority || 'normal',
-        p_is_blocking: !!input.is_blocking,
-        p_due_at: input.due_at || null,
-        p_required_document_id: input.required_document_id || null,
+        p_priority: input.priority || 'normal', p_is_blocking: !!input.is_blocking,
+        p_due_at: input.due_at || null, p_required_document_id: input.required_document_id || null,
         p_required_document_type: input.required_document_type || null,
-        p_created_by: actor.id || null,
-        p_actor_type: actor.type,
-        p_actor_id: actor.id || null,
-        p_source_system: SOURCE_SYSTEM,
-        p_correlation_id: correlationId || null,
-        p_idempotency_key: idempotencyKey,
-        p_request_hash: requestHash || null,
-        p_at: at || null,
+        p_created_by: actor.id || null, p_actor_type: actor.type, p_actor_id: actor.id || null,
+        p_source_system: SOURCE_SYSTEM, p_correlation_id: correlationId || null,
+        p_idempotency_key: idempotencyKey, p_request_hash: requestHash || null, p_at: at || null,
       }))
     } catch (e) { return { ok: false, error: 'persist_failed', detail: e?.message } }
     if (error) return { ok: false, error: mapDbError(error), detail: error.message }
@@ -114,20 +95,14 @@ export function createTaskRepo({ db }) {
     let data, error
     try {
       ({ data, error } = await db.rpc('ourmtg_task_transition', {
-        p_task_id: task.id,
-        p_action: action,
-        p_expected_revision: expectedRevision,
-        p_actor_type: actor.type,
-        p_actor_id: actor.id || null,
+        p_task_id: task.id, p_action: action,
+        p_expected_revision: expectedRevision ?? task.revision ?? 0,
+        p_actor_type: actor.type, p_actor_id: actor.id || null,
         p_organization_id: task.organization_id,
-        p_reason: reason || null,
-        p_borrower_visible_reason: borrowerVisibleReason || null,
+        p_reason: reason || null, p_borrower_visible_reason: borrowerVisibleReason || null,
         p_evidence: evidence != null ? evidence : null,
-        p_idempotency_key: idempotencyKey,
-        p_request_hash: requestHash || null,
-        p_correlation_id: correlationId || null,
-        p_source_system: SOURCE_SYSTEM,
-        p_at: at || null,
+        p_idempotency_key: idempotencyKey, p_request_hash: requestHash || null,
+        p_correlation_id: correlationId || null, p_source_system: SOURCE_SYSTEM, p_at: at || null,
       }))
     } catch (e) { return { ok: false, error: 'persist_failed', detail: e?.message } }
     if (error) return { ok: false, error: mapDbError(error), detail: error.message }
@@ -138,17 +113,12 @@ export function createTaskRepo({ db }) {
     let data, error
     try {
       ({ data, error } = await db.rpc('ourmtg_document_finalize_submit', {
-        p_document_id: documentId,
-        p_task_id: task.id,
+        p_document_id: documentId, p_task_id: task.id,
         p_organization_id: task.organization_id,
-        p_actor_user_id: actor.id || null,
-        p_actor_type: actor.type,
-        p_expected_revision: expectedRevision,
-        p_idempotency_key: idempotencyKey,
-        p_request_hash: requestHash || null,
-        p_correlation_id: correlationId || null,
-        p_source_system: SOURCE_SYSTEM,
-        p_at: at || null,
+        p_actor_user_id: actor.id || null, p_actor_type: actor.type,
+        p_expected_revision: expectedRevision ?? task.revision ?? 0,
+        p_idempotency_key: idempotencyKey, p_request_hash: requestHash || null,
+        p_correlation_id: correlationId || null, p_source_system: SOURCE_SYSTEM, p_at: at || null,
       }))
     } catch (e) { return { ok: false, error: 'persist_failed', detail: e?.message } }
     if (error) return { ok: false, error: mapDbError(error), detail: error.message }
@@ -160,13 +130,10 @@ export function createTaskRepo({ db }) {
 
 export function mapDbError(error) {
   const m = String(error?.message || '')
-  for (const code of [
-    'idempotency_required', 'idempotency_conflict', 'stale_task', 'org_mismatch',
-    'loan_org_mismatch', 'invalid_transition', 'review_required', 'reason_required',
-    'forbidden_action', 'task_not_found', 'document_not_found', 'cross_loan_document',
-    'not_borrower_task', 'not_participant', 'document_binding_mismatch',
-    'required_document_missing', 'participant_invalid', 'audience_invalid',
-  ]) {
+  for (const code of ['idempotency_required','idempotency_conflict','stale_task','org_mismatch',
+    'loan_org_mismatch','invalid_transition','review_required','reason_required','forbidden_action',
+    'task_not_found','document_not_found','cross_loan_document','not_borrower_task','not_participant',
+    'document_binding_mismatch','required_document_missing','participant_invalid','audience_invalid']) {
     if (m.includes(code)) return code
   }
   return 'persist_failed'
