@@ -1,56 +1,95 @@
-// Phase 1C — loan-team task pilot card (§11). Focused: create ONE borrower document task and
-// review submitted tasks (accept / reject-with-reason / request more info / reopen). Not a
-// generic workflow builder. Flag-gated by the caller (flags.loanTeamTaskPilot). Mobile-safe.
+// Phase 1C loan-team task pilot. Creates one exact document task for a verified
+// borrower audience and renders only lifecycle-valid review actions.
 import { useEffect, useState, useCallback } from 'react'
 import { listTasks, createTask, transitionTask } from '../lib/api'
 import { taskStatusLabel } from '../lib/taskLabels'
+import { teamActionsForTask, actionNeedsBorrowerReason } from '../lib/taskUi'
+import { getOrCreatePendingOperation, readPendingOperation, settlePendingOperation } from '../lib/pendingOps'
 import { Alert, Empty } from './ui'
 
-const REVIEW_ACTIONS = [
-  { action: 'accept', label: 'Accept', kind: 'btn-primary' },
-  { action: 'reject', label: 'Reject', kind: 'btn-ghost', needsReason: true },
-  { action: 'requestMoreInfo', label: 'More info', kind: 'btn-ghost' },
-  { action: 'reopen', label: 'Reopen', kind: 'btn-ghost' },
-]
+const blankForm = {
+  title: '', borrowerExplanation: '', internalRequirement: '', dueAt: '', isBlocking: false,
+  requiredDocumentType: '', requiredDocumentId: '', audience: 'shared',
+}
 
-export default function TeamTaskCard({ loanFileId }) {
+export default function TeamTaskCard({ loanFileId, participants = [], documents = [] }) {
   const [tasks, setTasks] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const [form, setForm] = useState({ title: '', borrowerExplanation: '', internalRequirement: '', dueAt: '', isBlocking: false, requiredDocumentType: '', sharedWithBorrowers: true })
+  const [form, setForm] = useState(blankForm)
 
-  const load = useCallback(() => {
-    return listTasks(loanFileId).then((r) => setTasks(r?.tasks || [])).catch((e) => setError(e?.message || 'Could not load tasks.'))
-  }, [loanFileId])
+  const load = useCallback(() => listTasks(loanFileId)
+    .then((r) => setTasks(r?.tasks || []))
+    .catch((e) => setError(e?.message || 'Could not load tasks.')), [loanFileId])
   useEffect(() => { load() }, [load])
+
+  // Refresh recovery: restore the material payload of an ambiguous create request.
+  useEffect(() => {
+    const pending = readPendingOperation(`task-create:${loanFileId}`)
+    if (pending?.material?.form) setForm((current) => ({ ...current, ...pending.material.form }))
+  }, [loanFileId])
 
   async function submit(e) {
     e.preventDefault()
     if (!form.title.trim()) { setError('A borrower-facing title is required.'); return }
+    if (!form.requiredDocumentId) { setError('Select the exact requested document.'); return }
+    if (form.audience !== 'shared' && !participants.some((p) => p.id === form.audience)) {
+      setError('Select a verified borrower participant.'); return
+    }
+
+    const payload = {
+      loanFileId,
+      taskType: 'document_request',
+      title: form.title,
+      borrowerExplanation: form.borrowerExplanation,
+      internalRequirement: form.internalRequirement,
+      dueAt: form.dueAt,
+      isBlocking: form.isBlocking,
+      requiredDocumentType: form.requiredDocumentType,
+      requiredDocumentId: form.requiredDocumentId,
+      sharedWithBorrowers: form.audience === 'shared',
+      responsibleUserId: form.audience === 'shared' ? null : form.audience,
+    }
+    const scope = `task-create:${loanFileId}`
+    const op = getOrCreatePendingOperation(scope, { form, payload })
     setBusy(true); setError('')
     try {
-      // F1: a stable per-submit idempotency key so a retried request creates ONE task.
-      const idempotencyKey = (globalThis.crypto?.randomUUID?.() || `create-${loanFileId}-${Date.now()}`)
-      await createTask({ loanFileId, taskType: 'document_request', idempotencyKey, ...form })
-      setForm({ title: '', borrowerExplanation: '', internalRequirement: '', dueAt: '', isBlocking: false, requiredDocumentType: '', sharedWithBorrowers: true })
+      await createTask({ ...payload, idempotencyKey: op.idempotencyKey })
+      settlePendingOperation(scope, op, null)
+      setForm(blankForm)
       await load()
-    } catch (e2) { setError(e2?.message || 'Could not create task.') } finally { setBusy(false) }
+    } catch (err) {
+      settlePendingOperation(scope, op, err)
+      setError(err?.message || 'Could not create task.')
+    } finally { setBusy(false) }
   }
 
-  async function act(taskId, action, needsReason) {
-    let borrowerVisibleReason
-    if (needsReason) {
-      borrowerVisibleReason = window.prompt('Borrower-visible reason for rejection:')
+  async function act(task, action) {
+    let borrowerVisibleReason = null
+    if (actionNeedsBorrowerReason(action)) {
+      borrowerVisibleReason = window.prompt('Borrower-visible reason:')
       if (!borrowerVisibleReason || borrowerVisibleReason.trim().length < 3) return
     }
+    const payload = {
+      taskId: task.id,
+      action,
+      expectedRevision: Number(task.revision || 0),
+      ...(borrowerVisibleReason ? { borrowerVisibleReason } : {}),
+    }
+    const scope = `task-transition:${task.id}:${action}`
+    const op = getOrCreatePendingOperation(scope, payload)
     setBusy(true); setError('')
     try {
-      // EXT-8: mandatory idempotency key per action.
-      const idempotencyKey = (globalThis.crypto?.randomUUID?.() || `act-${taskId}-${action}-${Date.now()}`)
-      await transitionTask(taskId, action, { idempotencyKey, ...(borrowerVisibleReason ? { borrowerVisibleReason } : {}) })
+      await transitionTask(task.id, action, { ...payload, idempotencyKey: op.idempotencyKey })
+      settlePendingOperation(scope, op, null)
       await load()
-    } catch (e) { setError(e?.message || 'Could not update task.') } finally { setBusy(false) }
+    } catch (err) {
+      settlePendingOperation(scope, op, err)
+      setError(err?.message || 'Could not update task.')
+    } finally { setBusy(false) }
   }
+
+  const availableDocs = documents.filter((d) => ['requested', 'rejected'].includes(d.status))
 
   return (
     <div className="card">
@@ -59,43 +98,47 @@ export default function TeamTaskCard({ loanFileId }) {
 
       <form onSubmit={submit} style={{ marginBottom: 16 }}>
         <div className="field"><label>Borrower-facing title</label>
-          <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="e.g. Upload your last 30 days of pay stubs" /></div>
-        <div className="field"><label>Plain-language explanation (borrower sees this)</label>
+          <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Upload your latest bank statement" /></div>
+        <div className="field"><label>Plain-language explanation</label>
           <textarea rows={2} value={form.borrowerExplanation} onChange={(e) => setForm({ ...form, borrowerExplanation: e.target.value })} /></div>
         <div className="field"><label>Internal requirement (team only)</label>
-          <input value={form.internalRequirement} onChange={(e) => setForm({ ...form, internalRequirement: e.target.value })} placeholder="Underwriter note — never shown to borrower" /></div>
+          <input value={form.internalRequirement} onChange={(e) => setForm({ ...form, internalRequirement: e.target.value })} /></div>
+        <div className="grid2">
+          <div className="field"><label>Borrower audience</label>
+            <select value={form.audience} onChange={(e) => setForm({ ...form, audience: e.target.value })}>
+              <option value="shared">All approved borrowers</option>
+              {participants.map((p) => (
+                <option key={p.id} value={p.id}>{p.name || p.email || p.id.slice(0, 8)} — {p.visibility === 'coborrower' ? 'Co-borrower' : 'Borrower'}</option>
+              ))}
+            </select></div>
+          <div className="field"><label>Exact requested document</label>
+            <select value={form.requiredDocumentId} onChange={(e) => setForm({ ...form, requiredDocumentId: e.target.value })}>
+              <option value="">Select a document…</option>
+              {availableDocs.map((d) => <option key={d.id} value={d.id}>{d.label} — {d.who}</option>)}
+            </select></div>
+        </div>
         <div className="grid2">
           <div className="field"><label>Due date</label>
             <input type="date" value={form.dueAt} onChange={(e) => setForm({ ...form, dueAt: e.target.value })} /></div>
-          <div className="field"><label>Expected document type</label>
-            <input value={form.requiredDocumentType} onChange={(e) => setForm({ ...form, requiredDocumentType: e.target.value })} placeholder="paystubs_30d" /></div>
+          <div className="field"><label>Document type</label>
+            <input value={form.requiredDocumentType} onChange={(e) => setForm({ ...form, requiredDocumentType: e.target.value })} /></div>
         </div>
-        <label className="check"><input type="checkbox" checked={form.sharedWithBorrowers} onChange={(e) => setForm({ ...form, sharedWithBorrowers: e.target.checked })} /> Shared with all borrowers on this file</label>
         <label className="check"><input type="checkbox" checked={form.isBlocking} onChange={(e) => setForm({ ...form, isBlocking: e.target.checked })} /> Blocks the loan</label>
-        <button className="btn btn-primary btn-sm" disabled={busy} style={{ marginTop: 10 }}>{busy ? 'Working…' : 'Create task'}</button>
+        <button className="btn btn-primary btn-sm" disabled={busy} style={{ marginTop: 10 }}>{busy ? 'Working…' : 'Create and assign task'}</button>
       </form>
 
-      {tasks && tasks.length === 0 && <Empty>No tasks yet. Create the first borrower document task above.</Empty>}
+      {tasks && tasks.length === 0 && <Empty>No tasks yet.</Empty>}
       {tasks && tasks.map((t) => (
         <div className="row" key={t.id}>
           <div className="grow">
             <div className="rlabel">{t.title} {t.is_blocking && <span className="chip">Blocking</span>}</div>
-            {t.internal_requirement && <div className="rsub" style={{ color: 'var(--muted)' }}>Internal: {t.internal_requirement}</div>}
+            {t.internal_requirement && <div className="rsub muted">Internal: {t.internal_requirement}</div>}
             <div className="rsub">Status: {taskStatusLabel(t.status, 'en')}</div>
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            {t.status === 'submitted' && (
-              <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => act(t.id, 'sendToTeamReview')}>To review</button>
-            )}
-            {t.status === 'team_review' && REVIEW_ACTIONS.map((a) => (
-              <button key={a.action} className={`btn btn-sm ${a.kind}`} disabled={busy} onClick={() => act(t.id, a.action, a.needsReason)}>{a.label}</button>
+            {teamActionsForTask(t.status).map((a) => (
+              <button key={a.action} className={`btn btn-sm ${a.primary ? 'btn-primary' : 'btn-ghost'}`} disabled={busy} onClick={() => act(t, a.action)}>{a.label}</button>
             ))}
-            {(t.status === 'submitted') && (
-              <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => act(t.id, 'requestMoreInfo')}>More info</button>
-            )}
-            {t.status === 'accepted' && (
-              <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => act(t.id, 'complete')}>Complete</button>
-            )}
           </div>
         </div>
       ))}
