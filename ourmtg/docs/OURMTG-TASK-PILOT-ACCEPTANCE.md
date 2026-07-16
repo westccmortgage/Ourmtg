@@ -102,6 +102,10 @@ select public.ourmtg_task_transition(:task,'assign', 0,'loan_officer',:lo_user,:
 select public.ourmtg_task_transition(:task,'cancel', 0,'loan_officer',:lo_user,:org,
   null,null,null,null,'idem-tr-2','hash-tr-2','corr-1','ourmtg', now());              -- must RAISE stale_task
 -- caller may NOT force a status/event: transition takes p_action only; the DB derives to-status + event.
+-- FCG-2.5: a reject / more-info WITHOUT a borrower-visible reason must RAISE reason_required (with a
+-- submitted task at :sub_rev):
+select public.ourmtg_task_transition(:task,'reject', :sub_rev,'loan_officer',:lo_user,:org,
+  null, null, null, null,'idem-noreason','hash-noreason','corr-1','ourmtg', now());   -- must RAISE reason_required
 ```
 
 ## 7. EXT-5 — atomic document finalize + submit

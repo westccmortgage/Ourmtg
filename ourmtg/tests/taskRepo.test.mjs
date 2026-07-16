@@ -135,6 +135,8 @@ function fakeDb({ failRpc = false } = {}) {
         if (!to) return { data: null, error: { message: 'invalid_transition' } }
         if (!roleAllows(p.p_actor_type, to)) return { data: null, error: { message: 'forbidden_action' } }
         if (to === 'accepted' && REVIEW_REQUIRED.includes(t.task_type) && from !== 'team_review') return { data: null, error: { message: 'review_required' } }
+        // FCG-2.5: reject / more-info require a borrower-visible reason at the RPC layer.
+        if ((to === 'rejected' || to === 'more_information_needed') && (p.p_borrower_visible_reason == null || String(p.p_borrower_visible_reason).trim() === '')) return { data: null, error: { message: 'reason_required' } }
         t.status = to
         t.revision = (t.revision ?? 0) + 1                            // EXT-4 bump
         if (to === 'rejected' || to === 'more_information_needed') t.borrower_visible_status_reason = p.p_borrower_visible_reason ?? null
@@ -154,8 +156,13 @@ function fakeDb({ failRpc = false } = {}) {
         if (t.organization_id !== p.p_organization_id) return { data: null, error: { message: 'org_mismatch' } }
         if (doc.loan_file_id !== t.loan_file_id) return { data: null, error: { message: 'cross_loan_document' } }
         if (!['borrower', 'coborrower'].includes(t.responsible_party_type)) return { data: null, error: { message: 'not_borrower_task' } }
+        // FCG #2/#7: the acting user must be the targeted participant (or shared/untargeted).
+        if (!(t.shared_with_borrowers || t.responsible_user_id == null || t.responsible_user_id === p.p_actor_user_id)) return { data: null, error: { message: 'not_participant' } }
+        // FCG #3/#7: one exact document binding — a different document cannot be finalized once linked.
+        if (t.linked_document_id != null && t.linked_document_id !== p.p_document_id) return { data: null, error: { message: 'document_binding_mismatch' } }
         if ((t.revision ?? 0) !== p.p_expected_revision) return { data: null, error: { message: 'stale_task' } }
-        if (!nextStatus(t.status, 'submit')) return { data: null, error: { message: 'invalid_transition' } }
+        // FCG #1: the document finalize is executable from any borrower-actionable pre-submission state.
+        if (!['created', 'assigned', 'viewed', 'in_progress', 'rejected', 'more_information_needed', 'reopened'].includes(t.status)) return { data: null, error: { message: 'invalid_transition' } }
         const from = t.status
         doc.status = 'uploaded'
         t.status = 'submitted'; t.revision = (t.revision ?? 0) + 1; t.linked_document_id = p.p_document_id; t.borrower_visible_status_reason = null
@@ -461,4 +468,164 @@ test('EXT-5: retry of a successful finalize finalizes exactly once (deduped, no 
   assert.equal(a.deduped, false)
   assert.equal(b.deduped, true)
   assert.equal(db.domainEvents().filter((e) => e.event_type === 'task.submitted').length, 1)
+})
+
+// helper: drive a fresh borrower document task to 'submitted'
+async function driveToSubmitted(db, repo, keyPrefix) {
+  const c = await repo.createTask({ actor: lo, idempotencyKey: `${keyPrefix}-c`, input: baseInput({ responsible_party_type: 'borrower' }) })
+  const id = c.task_id
+  for (const [action, who] of [['assign', lo], ['view', lo], ['begin', lo], ['submit', borrower]]) {
+    const cur = db.tasks.get(id)
+    await repo.transition({ task: cur, action, actor: who, idempotencyKey: `${keyPrefix}-${action}`, expectedRevision: cur.revision })
+  }
+  return id
+}
+
+// ---------------------------------------------------------------------------------------------
+// FCG-2.5 / FCG-11.8 — a reject without a borrower-visible reason cannot complete (zero writes)
+// ---------------------------------------------------------------------------------------------
+test('FCG-2.5: reject with no borrower-visible reason is rejected (reason_required, zero writes)', async () => {
+  const db = fakeDb(); const repo = createTaskRepo({ db })
+  const id = await driveToSubmitted(db, repo, 'rr')
+  const before = { h: db.history.length, e: db.events.length, status: db.tasks.get(id).status }
+  const cur = db.tasks.get(id)
+  const r = await repo.transition({ task: cur, action: 'reject', actor: lo, idempotencyKey: 'reject-noreason', expectedRevision: cur.revision }) // no borrowerVisibleReason
+  assert.equal(r.ok, false)
+  assert.equal(r.error, 'reason_required')
+  assert.equal(db.tasks.get(id).status, before.status) // unchanged
+  assert.equal(db.history.length, before.h)            // zero writes
+  assert.equal(db.events.length, before.e)
+})
+
+test('FCG-12.3: reject WITH a reason succeeds and preserves the reason', async () => {
+  const db = fakeDb(); const repo = createTaskRepo({ db })
+  const id = await driveToSubmitted(db, repo, 'rok')
+  const cur = db.tasks.get(id)
+  const r = await repo.transition({ task: cur, action: 'reject', actor: lo, borrowerVisibleReason: 'Statement is unreadable', idempotencyKey: 'reject-ok', expectedRevision: cur.revision })
+  assert.equal(r.ok, true)
+  assert.equal(db.tasks.get(id).status, 'rejected')
+  assert.equal(db.tasks.get(id).borrower_visible_status_reason, 'Statement is unreadable')
+})
+
+// ---------------------------------------------------------------------------------------------
+// FCG-11.22 — a repeated (idempotent) reject does not create a duplicate notification intent
+// ---------------------------------------------------------------------------------------------
+test('FCG-11.22: repeated reject with the same key produces exactly one notification intent', async () => {
+  const db = fakeDb(); const repo = createTaskRepo({ db })
+  const id = await driveToSubmitted(db, repo, 'dup')
+  // Genuine double-submit: both requests are built from the SAME pre-reject snapshot ('submitted').
+  const snap = { ...db.tasks.get(id) }
+  const first = await repo.transition({ task: { ...snap }, action: 'reject', actor: lo, borrowerVisibleReason: 'Blurry', idempotencyKey: 'reject-dup', requestHash: 'RJ', expectedRevision: snap.revision })
+  const retry = await repo.transition({ task: { ...snap }, action: 'reject', actor: lo, borrowerVisibleReason: 'Blurry', idempotencyKey: 'reject-dup', requestHash: 'RJ', expectedRevision: snap.revision })
+  assert.equal(first.deduped, false)
+  assert.equal(retry.deduped, true)
+  assert.equal(db.intentEvents().filter((e) => e.metadata?.intent === 'borrower_task_rejected').length, 1)
+})
+
+// ---------------------------------------------------------------------------------------------
+// FCG-2.8 / FCG-11.9 / FCG-11.20 — cross-organization mutation is impossible at the RPC contract
+// ---------------------------------------------------------------------------------------------
+test('FCG-2.8: the transition RPC rejects a cross-organization mutation (org_mismatch)', async () => {
+  const db = fakeDb(); const repo = createTaskRepo({ db })
+  const c = await repo.createTask({ actor: lo, idempotencyKey: 'xorg-c', input: baseInput() }) // org 'org'
+  const before = { h: db.history.length, e: db.events.length }
+  const { error } = await db.rpc('ourmtg_task_transition', {
+    p_task_id: c.task_id, p_action: 'assign', p_expected_revision: 0, p_actor_type: 'loan_officer',
+    p_actor_id: 'lo1', p_organization_id: 'OTHER-ORG', p_idempotency_key: 'xorg-tr', p_request_hash: 'X',
+  })
+  assert.equal(error.message, 'org_mismatch')
+  assert.equal(db.history.length, before.h) // zero writes
+  assert.equal(db.events.length, before.e)
+})
+
+test('FCG-11.20: the finalize RPC rejects a cross-organization document/task link (org_mismatch)', async () => {
+  const db = fakeDb(); const repo = createTaskRepo({ db })
+  const c = await repo.createTask({ actor: lo, idempotencyKey: 'xorg-fc', input: baseInput({ responsible_party_type: 'borrower' }) })
+  const docId = db.addDoc({ loan_file_id: 'f' })
+  const { error } = await db.rpc('ourmtg_document_finalize_submit', {
+    p_document_id: docId, p_task_id: c.task_id, p_organization_id: 'OTHER-ORG', p_actor_user_id: 'b1',
+    p_actor_type: 'borrower', p_expected_revision: 0, p_idempotency_key: 'xorg-fin', p_request_hash: 'X',
+  })
+  assert.equal(error.message, 'org_mismatch')
+  assert.equal(db.documents.get(docId).status, 'requested') // unchanged
+})
+
+// ---------------------------------------------------------------------------------------------
+// FCG clarification #1 — the borrower task lifecycle is executable end to end via the document finalize
+// ---------------------------------------------------------------------------------------------
+test('FCG #1: create → assign → view → begin → linked finalize → submitted (end to end)', async () => {
+  const db = fakeDb(); const repo = createTaskRepo({ db })
+  const c = await repo.createTask({ actor: lo, idempotencyKey: 'e2e-create', input: baseInput({ responsible_party_type: 'borrower', shared_with_borrowers: true }) })
+  const id = c.task_id
+  for (const action of ['assign', 'view', 'begin']) {
+    const cur = db.tasks.get(id)
+    const r = await repo.transition({ task: cur, action, actor: lo, idempotencyKey: `e2e-${action}`, expectedRevision: cur.revision })
+    assert.equal(r.ok, true, `${action}: ${r.error || ''}`)
+  }
+  assert.equal(db.tasks.get(id).status, 'in_progress')
+  const docId = db.addDoc({ loan_file_id: 'f' })
+  const fin = await repo.finalizeDocumentSubmit({ documentId: docId, task: db.tasks.get(id), actor: { type: 'borrower', id: 'b1' }, idempotencyKey: 'e2e-fin', requestHash: 'E2E' })
+  assert.equal(fin.ok, true)
+  assert.equal(db.tasks.get(id).status, 'submitted')
+  assert.equal(db.documents.get(docId).status, 'uploaded')
+  assert.equal(db.tasks.get(id).linked_document_id, docId)
+})
+
+test('FCG #1: a borrower can finalize directly from a freshly created (unassigned) task', async () => {
+  const db = fakeDb(); const repo = createTaskRepo({ db })
+  const c = await repo.createTask({ actor: lo, idempotencyKey: 'fresh-c', input: baseInput({ responsible_party_type: 'borrower', shared_with_borrowers: true }) })
+  const id = c.task_id
+  const docId = db.addDoc({ loan_file_id: 'f' })
+  const r = await repo.finalizeDocumentSubmit({ documentId: docId, task: db.tasks.get(id), actor: { type: 'borrower', id: 'b1' }, idempotencyKey: 'fresh-fin', requestHash: 'F' })
+  assert.equal(r.ok, true)
+  assert.equal(db.tasks.get(id).status, 'submitted')
+})
+
+test('FCG #1: finalize from a terminal (completed) state is rejected (invalid_transition, nothing changes)', async () => {
+  const db = fakeDb(); const repo = createTaskRepo({ db })
+  const c = await repo.createTask({ actor: lo, idempotencyKey: 'term-c', input: baseInput({ responsible_party_type: 'borrower', shared_with_borrowers: true }) })
+  const id = c.task_id
+  db.tasks.get(id).status = 'completed'
+  const docId = db.addDoc({ loan_file_id: 'f' })
+  const r = await repo.finalizeDocumentSubmit({ documentId: docId, task: db.tasks.get(id), actor: { type: 'borrower', id: 'b1' }, idempotencyKey: 'term-fin', requestHash: 'T' })
+  assert.equal(r.ok, false)
+  assert.equal(r.error, 'invalid_transition')
+  assert.equal(db.documents.get(docId).status, 'requested')
+})
+
+// ---------------------------------------------------------------------------------------------
+// FCG clarification #2/#7 — participant targeting is enforced at the finalize RPC
+// ---------------------------------------------------------------------------------------------
+test('FCG #2/#7: a borrower cannot finalize a task targeted at ANOTHER borrower (not_participant)', async () => {
+  const db = fakeDb(); const repo = createTaskRepo({ db })
+  const c = await repo.createTask({ actor: lo, idempotencyKey: 'tgt-c', input: baseInput({ responsible_party_type: 'borrower', responsible_user_id: 'b1', shared_with_borrowers: false }) })
+  const id = c.task_id
+  const docId = db.addDoc({ loan_file_id: 'f' })
+  const wrong = await repo.finalizeDocumentSubmit({ documentId: docId, task: db.tasks.get(id), actor: { type: 'borrower', id: 'b2' }, idempotencyKey: 'tgt-b2', requestHash: 'B2' })
+  assert.equal(wrong.ok, false)
+  assert.equal(wrong.error, 'not_participant')
+  assert.equal(db.documents.get(docId).status, 'requested') // untouched
+  // the targeted borrower succeeds
+  const right = await repo.finalizeDocumentSubmit({ documentId: docId, task: db.tasks.get(id), actor: { type: 'borrower', id: 'b1' }, idempotencyKey: 'tgt-b1', requestHash: 'B1' })
+  assert.equal(right.ok, true)
+  assert.equal(db.tasks.get(id).status, 'submitted')
+})
+
+// ---------------------------------------------------------------------------------------------
+// FCG clarification #3/#7 — a document task binds to ONE exact document
+// ---------------------------------------------------------------------------------------------
+test('FCG #3/#7: once bound, finalizing a DIFFERENT document is rejected (document_binding_mismatch)', async () => {
+  const db = fakeDb(); const repo = createTaskRepo({ db })
+  const c = await repo.createTask({ actor: lo, idempotencyKey: 'bind-c', input: baseInput({ responsible_party_type: 'borrower', shared_with_borrowers: true }) })
+  const id = c.task_id
+  const docA = db.addDoc({ loan_file_id: 'f' })
+  const docB = db.addDoc({ loan_file_id: 'f' })
+  db.tasks.get(id).linked_document_id = docA // already bound to docA
+  const mismatch = await repo.finalizeDocumentSubmit({ documentId: docB, task: db.tasks.get(id), actor: { type: 'borrower', id: 'b1' }, idempotencyKey: 'bind-b', requestHash: 'BB' })
+  assert.equal(mismatch.ok, false)
+  assert.equal(mismatch.error, 'document_binding_mismatch')
+  // finalizing the SAME bound document is allowed
+  const ok = await repo.finalizeDocumentSubmit({ documentId: docA, task: db.tasks.get(id), actor: { type: 'borrower', id: 'b1' }, idempotencyKey: 'bind-a', requestHash: 'BA' })
+  assert.equal(ok.ok, true)
+  assert.equal(db.tasks.get(id).status, 'submitted')
 })

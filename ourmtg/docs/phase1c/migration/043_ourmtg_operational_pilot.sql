@@ -251,6 +251,12 @@ begin
       coalesce(p_at, now()));
 
   return jsonb_build_object('ok', true, 'deduped', false, 'task_id', v_task_id);
+exception when unique_violation then
+  -- FCG #5: a concurrent retry won the idempotency-key race; reuse that committed operation.
+  select * into v_existing from public.loan_events
+    where organization_id = p_organization_id and idempotency_key = p_idempotency_key limit 1;
+  if found and v_existing.request_hash is distinct from p_request_hash then raise exception 'idempotency_conflict'; end if;
+  return jsonb_build_object('ok', true, 'deduped', true, 'task_id', v_existing.source_record_id::uuid);
 end $$;
 
 -- ============================================================================================
@@ -284,6 +290,13 @@ begin
   if not public.ourmtg_task_role_allows(p_actor_type, v_to) then raise exception 'forbidden_action'; end if;
   if v_to = 'accepted' and v_task.task_type in ('document_request','document_reupload','condition','signature')
      and v_from <> 'team_review' then raise exception 'review_required'; end if;
+  -- FCG-2.5 / EXT-6: a reject or more-information transition CANNOT complete without a borrower-visible
+  -- reason. Defense-in-depth: the gateway already enforces this, but the RPC is the authority so the
+  -- rule holds even if a caller bypasses the gateway.
+  if v_to in ('rejected','more_information_needed')
+     and (p_borrower_visible_reason is null or btrim(p_borrower_visible_reason) = '') then
+    raise exception 'reason_required';
+  end if;
   v_evt := public.ourmtg_task_event_type(p_action);                              -- EXT-4 derive event
 
   update public.loan_tasks set
@@ -324,6 +337,12 @@ begin
   end if;
 
   return jsonb_build_object('ok', true, 'deduped', false, 'from', v_from, 'to', v_to, 'revision', v_task.revision + 1);
+exception when unique_violation then
+  -- FCG #5: a concurrent retry won the idempotency-key race; reuse that committed operation.
+  select * into v_existing from public.loan_events
+    where organization_id = p_organization_id and idempotency_key = p_idempotency_key limit 1;
+  if found and v_existing.request_hash is distinct from p_request_hash then raise exception 'idempotency_conflict'; end if;
+  return jsonb_build_object('ok', true, 'deduped', true);
 end $$;
 
 -- ============================================================================================
@@ -351,12 +370,25 @@ begin
   if not found then raise exception 'document_not_found'; end if;
   select * into v_task from public.loan_tasks where id = p_task_id for update;
   if not found then raise exception 'task_not_found'; end if;
-  -- Relationship + org + participant validation (all must line up or roll back).
+  -- Relationship + org + participant + document-binding validation (all must line up or roll back).
   if v_task.organization_id <> p_organization_id then raise exception 'org_mismatch'; end if;
   if v_doc.loan_file_id <> v_task.loan_file_id then raise exception 'cross_loan_document'; end if;
   if v_task.responsible_party_type not in ('borrower','coborrower') then raise exception 'not_borrower_task'; end if;
+  -- FCG #2/#7: the acting user must be the task's targeted participant (specific borrower/co-borrower),
+  -- or the task is shared with all borrowers, or it is untargeted. One borrower cannot finalize a task
+  -- targeted at another borrower.
+  if not (v_task.shared_with_borrowers or v_task.responsible_user_id is null or v_task.responsible_user_id = p_actor_user_id)
+    then raise exception 'not_participant'; end if;
+  -- FCG #3/#7: a document task binds to ONE exact document. Once a document is linked, finalizing a
+  -- DIFFERENT document against the same task is rejected (no silent re-binding).
+  if v_task.linked_document_id is not null and v_task.linked_document_id <> p_document_id
+    then raise exception 'document_binding_mismatch'; end if;
   if v_task.revision <> p_expected_revision then raise exception 'stale_task'; end if;
-  if public.ourmtg_task_next_status(v_task.status, 'submit') is null then raise exception 'invalid_transition'; end if;
+  -- FCG #1: the borrower document finalize is the borrower's single submit action and is executable
+  -- from any borrower-actionable pre-submission state (mirrors borrowerMustAct). The plain 'submit'
+  -- transition graph (ourmtg_task_next_status) is unchanged; only this document-driven submit broadens.
+  if v_task.status not in ('created','assigned','viewed','in_progress','rejected','more_information_needed','reopened')
+    then raise exception 'invalid_transition'; end if;
 
   update public.loan_documents set status = 'uploaded', uploaded_at = coalesce(p_at, now()) where id = p_document_id;
   update public.loan_tasks set status = 'submitted', revision = revision + 1, linked_document_id = p_document_id,
@@ -371,6 +403,12 @@ begin
       jsonb_build_object('status', v_task.status), jsonb_build_object('status','submitted'),
       jsonb_build_object('document_id', p_document_id::text), coalesce(p_at, now()));
   return jsonb_build_object('ok', true, 'deduped', false, 'task_id', p_task_id, 'document_id', p_document_id);
+exception when unique_violation then
+  -- FCG #5: a concurrent retry won the idempotency-key race; reuse that committed operation.
+  select * into v_existing from public.loan_events
+    where organization_id = p_organization_id and idempotency_key = p_idempotency_key limit 1;
+  if found and v_existing.request_hash is distinct from p_request_hash then raise exception 'idempotency_conflict'; end if;
+  return jsonb_build_object('ok', true, 'deduped', true, 'task_id', p_task_id, 'document_id', p_document_id);
 end $$;
 
 -- ============================================================================================
@@ -433,12 +471,22 @@ end $$;
 -- 4) loan_files.organization_id backfill (single pilot org):
 --    update public.loan_files lf set organization_id = o.id
 --      from public.organizations o where o.slug = 'west-coast-capital-mortgage' and lf.organization_id is null;
--- 5) NULL / MISMATCH report (must be zero before enabling flags):
---    select count(*) as files_without_org from public.loan_files where organization_id is null;   -- expect 0
---    select count(*) as owners_without_membership from (
+-- 5) NULL / MISMATCH report — ORGANIZATION-SCOPED (FCG #8). Validation is bound to the TARGET org
+--    (slug 'west-coast-capital-mortgage'); a membership in some OTHER org does not count as backfilled.
+--    All checks must be zero before enabling flags.
+--    with target as (select id from public.organizations where slug = 'west-coast-capital-mortgage')
+--    -- (a) files not assigned to THE target org (null OR assigned elsewhere):
+--    select count(*) as files_not_in_target_org from public.loan_files lf
+--      where lf.organization_id is distinct from (select id from target);                          -- expect 0
+--    -- (b) owners of target-org files lacking an ACTIVE membership IN THE TARGET ORG:
+--    with target as (select id from public.organizations where slug = 'west-coast-capital-mortgage')
+--    select count(*) as owners_without_target_membership from (
 --      select distinct lf.owner_user_id from public.loan_files lf
---      left join public.organization_members m on m.user_id = lf.owner_user_id
---      where m.user_id is null) t;                                                                 -- expect 0
+--      where lf.organization_id = (select id from target)
+--      and not exists (select 1 from public.organization_members m
+--                      where m.user_id = lf.owner_user_id
+--                        and m.organization_id = (select id from target)
+--                        and m.status = 'active')) t;                                              -- expect 0
 
 -- ---------- VALIDATION QUERIES (after a branch apply) ----------
 -- select count(*) from information_schema.tables where table_schema='public'

@@ -26,7 +26,7 @@ import { sendPlatformEmail, brandedEmail, esc } from './_lib/mailer.mjs'
 import { resolveTaskContext } from './_lib/orgAccess.mjs'
 import { createTaskRepo } from './_lib/taskRepo.mjs'
 import { taskPilotEnabled } from './_lib/featureFlags.mjs'
-import { isUuid } from './_lib/requestGuard.mjs'
+import { docTaskLinkDecision } from './_lib/requestGuard.mjs'
 import { requestHash } from './_lib/idempotency.mjs'
 
 const BUCKET = 'ourmtg-docs'
@@ -82,13 +82,16 @@ export default async (req) => {
     return json({ ok: false, error: 'Upload not found — please try uploading again' }, 409)
   }
 
-  const taskId = String(body.taskId || '').trim()
+  // FCG #6: once a taskId is supplied there is NO legacy fallback — it must finalize via the task path
+  // or return an error. Only a request WITHOUT a taskId uses the legacy (task-less) flip.
+  const route = docTaskLinkDecision(body.taskId, taskPilotEnabled())
+  if (route.mode === 'error') return json({ ok: false, error: route.error }, route.status)
   let taskTransition = null
 
-  // EXT-5: task-linked finalize is ONE atomic RPC (mark uploaded + link + submit + history +
-  // event). Gated by the borrower pilot flag; otherwise the legacy flip runs. If the RPC fails,
-  // NEITHER the document nor the task changed (both roll back).
-  if (taskId && isUuid(taskId) && taskPilotEnabled()) {
+  if (route.mode === 'task') {
+    // EXT-5: task-linked finalize is ONE atomic RPC (mark uploaded + link + submit + history +
+    // event). If the RPC fails, NEITHER the document nor the task changed (both roll back).
+    const taskId = route.taskId
     const repo = createTaskRepo({ db: svc })
     let task
     try { task = await repo.getTask(taskId) } catch { return json({ ok: false, error: 'Database error' }, 500) }
@@ -104,12 +107,12 @@ export default async (req) => {
       correlationId: await randomToken(8), idempotencyKey: idem, requestHash: rHash, at: new Date().toISOString(),
     })
     if (!result.ok) {
-      const st = { stale_task: 409, cross_loan_document: 400, not_borrower_task: 403, invalid_transition: 409, idempotency_conflict: 409, document_not_found: 404, task_not_found: 404 }
+      const st = { stale_task: 409, cross_loan_document: 400, not_borrower_task: 403, not_participant: 403, document_binding_mismatch: 409, invalid_transition: 409, idempotency_conflict: 409, document_not_found: 404, task_not_found: 404 }
       return json({ ok: false, error: result.error === 'persist_failed' ? 'Could not submit your document' : result.error }, st[result.error] || 500)
     }
     taskTransition = { ok: true, to: 'submitted' }
   } else {
-    // Legacy flow (no task link): flip the document to uploaded.
+    // Legacy flow (no task link supplied): flip the document to uploaded.
     const { error: uErr } = await svc.from('loan_documents')
       .update({ status: 'uploaded', uploaded_at: new Date().toISOString() }).eq('id', doc.id)
     if (uErr) {

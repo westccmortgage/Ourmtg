@@ -29,6 +29,20 @@ export function hasDangerousKeys(value, depth = 0) {
   return false
 }
 
+// FCG #6: once a caller supplies a taskId to portal-doc-complete there must be NO legacy fallback.
+// Decide the finalize route purely from the taskId + server flag:
+//   no taskId            → 'legacy'  (existing task-less document finalize, unchanged)
+//   taskId, bad UUID     → 'error' 400
+//   taskId, pilot off    → 'error' 404  (never legacy — the link was requested and must be honored)
+//   taskId, valid + on   → 'task'   (atomic document-finalize + task-submit)
+export function docTaskLinkDecision(taskId, pilotEnabled) {
+  const raw = taskId == null ? '' : String(taskId).trim()
+  if (raw === '') return { mode: 'legacy' }
+  if (!isUuid(raw)) return { mode: 'error', status: 400, error: 'Invalid taskId' }
+  if (!pilotEnabled) return { mode: 'error', status: 404, error: 'Not available' }
+  return { mode: 'task', taskId: raw }
+}
+
 // Read + validate a JSON POST body. Returns { ok, body } or { ok:false, status, error }.
 // maxBytes caps the raw payload; content type must be JSON; prototype-pollution keys rejected.
 export async function readJsonBody(req, { maxBytes = 32_000 } = {}) {

@@ -21,6 +21,24 @@ export async function memberOfOrg(svc, userId, organizationId) {
   return { ok: true, provisioned: true, role: data.role }
 }
 
+// FCG #2: a borrower-facing task may target ONE specific primary borrower or co-borrower. Verify the
+// target is a REAL borrower/co-borrower participant on THIS loan file (via a portal_access grant),
+// never an arbitrary or unverified user id. Returns { ok, visibility } or { ok:false }.
+export async function verifyBorrowerParticipant(svc, loanFileId, userId) {
+  if (!loanFileId || !userId) return { ok: false }
+  const { data, error } = await svc
+    .from('portal_access')
+    .select('visibility')
+    .eq('loan_file_id', loanFileId).eq('portal_user', userId)
+    .in('visibility', ['borrower', 'coborrower'])
+    .maybeSingle()
+  if (error) {
+    if (error.code === '42P01') return { ok: false }
+    throw new Error('portal_access read: ' + error.message)
+  }
+  return data ? { ok: true, visibility: data.visibility } : { ok: false }
+}
+
 // Map a resolveAccess result to a task-service actor type.
 export function actorTypeFor(access, teamRole) {
   if (!access) return null

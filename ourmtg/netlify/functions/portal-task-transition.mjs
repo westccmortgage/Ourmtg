@@ -13,7 +13,7 @@ import { isValidIdempotencyKey, requestHash } from './_lib/idempotency.mjs'
 
 const ACTIONS = ['assign', 'view', 'begin', 'submit', 'precheck', 'sendToTeamReview', 'accept', 'reject', 'requestMoreInfo', 'complete', 'reopen', 'cancel']
 const ERR_STATUS = {
-  unknown_action: 400, invalid_transition: 409, review_required: 409, stale_task: 409,
+  unknown_action: 400, invalid_transition: 409, review_required: 409, stale_task: 409, reason_required: 400,
   idempotency_conflict: 409, forbidden_action: 403, forbidden_role: 403, ai_forbidden: 403, task_not_found: 404,
 }
 

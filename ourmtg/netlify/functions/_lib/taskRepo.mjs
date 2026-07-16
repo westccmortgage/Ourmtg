@@ -134,8 +134,9 @@ export function createTaskRepo({ db }) {
 export function mapDbError(error) {
   const m = String(error?.message || '')
   for (const code of ['idempotency_required', 'idempotency_conflict', 'stale_task', 'org_mismatch',
-    'invalid_transition', 'review_required', 'forbidden_action', 'task_not_found', 'document_not_found',
-    'cross_loan_document', 'not_borrower_task']) {
+    'invalid_transition', 'review_required', 'reason_required', 'forbidden_action', 'task_not_found',
+    'document_not_found', 'cross_loan_document', 'not_borrower_task', 'not_participant',
+    'document_binding_mismatch']) {
     if (m.includes(code)) return code
   }
   return 'persist_failed'

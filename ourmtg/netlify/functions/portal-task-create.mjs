@@ -4,7 +4,7 @@
 // key + material-payload hash (EXT-8). Participant selection required (EXT-7).
 import { admin, isConfigured } from './_lib/supabase.mjs'
 import { authUser, json, preflight, loadLoanFile, resolveAccess, logAccess, randomToken } from './_lib/portal.mjs'
-import { resolveTaskContext } from './_lib/orgAccess.mjs'
+import { resolveTaskContext, verifyBorrowerParticipant } from './_lib/orgAccess.mjs'
 import { createTaskRepo } from './_lib/taskRepo.mjs'
 import { loanTeamTaskPilotEnabled } from './_lib/featureFlags.mjs'
 import { readJsonBody, isUuid, isEnum, boundedString, isValidTimestamp } from './_lib/requestGuard.mjs'
@@ -53,6 +53,14 @@ export default async (req) => {
   if (!loanFile) return json({ ok: false, error: 'Loan file not found' }, 404)
   if (!ctx.provisioned) return json({ ok: false, error: 'Task pilot is not enabled for this loan' }, 503)
   if (!ctx.ok || !ctx.isInternal) return json({ ok: false, error: 'Only the loan team can create tasks' }, 403)
+  // FCG #2: a targeted participant must be a VERIFIED borrower/co-borrower on THIS loan file — never an
+  // arbitrary user id. (Shared-with-all-borrowers needs no specific target.)
+  if (responsibleUserId) {
+    let part
+    try { part = await verifyBorrowerParticipant(svc, loanFileId, responsibleUserId) }
+    catch (e) { console.error('[portal-task-create] participant check error'); return json({ ok: false, error: 'Database error' }, 500) }
+    if (!part.ok) return json({ ok: false, error: 'The selected participant is not a borrower on this loan file' }, 400)
+  }
 
   const dueAt = body.dueAt ? new Date(body.dueAt).toISOString() : null
   const input = {

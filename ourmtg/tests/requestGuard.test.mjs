@@ -3,7 +3,7 @@
 // bounded-string / timestamp validators. Pure — a fake Request is built inline.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { isUuid, isEnum, boundedString, isValidTimestamp, hasDangerousKeys, readJsonBody } from '../netlify/functions/_lib/requestGuard.mjs'
+import { isUuid, isEnum, boundedString, isValidTimestamp, hasDangerousKeys, readJsonBody, docTaskLinkDecision } from '../netlify/functions/_lib/requestGuard.mjs'
 
 function fakeReq({ body = '', contentType = 'application/json' } = {}) {
   return {
@@ -89,4 +89,23 @@ test('readJsonBody accepts a clean JSON object', async () => {
   const r = await readJsonBody(fakeReq({ body: '{"taskId":"abc","action":"accept"}' }))
   assert.equal(r.ok, true)
   assert.equal(r.body.action, 'accept')
+})
+
+// FCG #6: portal-doc-complete must NOT fall back to the legacy finalize once a taskId is supplied.
+test('docTaskLinkDecision: no taskId → legacy', () => {
+  assert.equal(docTaskLinkDecision(undefined, true).mode, 'legacy')
+  assert.equal(docTaskLinkDecision('', true).mode, 'legacy')
+  assert.equal(docTaskLinkDecision('   ', false).mode, 'legacy')
+})
+
+test('docTaskLinkDecision: a supplied taskId NEVER falls back to legacy', () => {
+  // bad UUID → error, not legacy
+  const bad = docTaskLinkDecision('not-a-uuid', true)
+  assert.equal(bad.mode, 'error'); assert.equal(bad.status, 400)
+  // valid UUID but pilot OFF → error (404), NOT legacy
+  const off = docTaskLinkDecision('3f2504e0-4f89-41d3-9a0c-0305e82c3301', false)
+  assert.equal(off.mode, 'error'); assert.equal(off.status, 404)
+  // valid UUID + pilot ON → task path
+  const ok = docTaskLinkDecision('3f2504e0-4f89-41d3-9a0c-0305e82c3301', true)
+  assert.equal(ok.mode, 'task'); assert.equal(ok.taskId, '3f2504e0-4f89-41d3-9a0c-0305e82c3301')
 })

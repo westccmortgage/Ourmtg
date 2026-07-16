@@ -36,7 +36,9 @@ isBlocking?, requiredDocumentType?, taskType?, priority?, sharedWithBorrowers?, 
   same payload → the original `taskId` (`deduped:true`); same key + different payload →
   `idempotency_conflict` (`409`).
 - **Participant selection is required** (EXT-7): `sharedWithBorrowers:true` **or** a valid
-  `responsibleUserId` (UUID). Neither → `400`.
+  `responsibleUserId` (UUID). Neither → `400`. When `responsibleUserId` is given it must be a **verified
+  borrower/co-borrower** on this loan file (checked against `portal_access`, FCG #2) — an arbitrary or
+  cross-file user id is rejected `400`.
 - `dueAt` validated (`400` on a bad date). Creates atomically (task + history `created` + event
   `task.created`) and writes the borrower notification **intent in the same transaction**, keyed
   `intent:<idempotencyKey>` (EXT-9 — no send here). → `{ ok, taskId, deduped? }`.
@@ -53,7 +55,9 @@ requestMoreInfo | complete | reopen | cancel`.
   event atomically.
 - `reject` / `requestMoreInfo` require a **borrower-visible reason** (`borrowerVisibleReason`, ≥3 chars,
   EXT-6). The reason is stored on the task, returned to the borrower, and **cleared** when the borrower
-  resubmits or the item is accepted/completed. `reason` is a separate internal (private) note.
+  resubmits or the item is accepted/completed. `reason` is a separate internal (private) note. This is
+  enforced at the gateway **and** re-enforced by the RPC (`reason_required`), so the rule holds even if a
+  caller reaches the RPC directly (FCG-2.5, defense-in-depth).
 - `evidence` is accepted **only from internal (team) actors** and only under a size cap.
 - **`idempotencyKey` is MANDATORY** and bound to `{taskId, action, expectedRevision, actor, reason,
   borrowerVisibleReason, evidence}` (EXT-8). `linkedDocumentId` is **not** accepted here — document
@@ -61,19 +65,28 @@ requestMoreInfo | complete | reopen | cancel`.
 - A reject / more-info also writes the borrower notification **intent in the same transaction** (EXT-9).
 → `{ ok, from, to, revision, deduped? }`.
 
-Error → HTTP: `unknown_action`→400 · `invalid_transition`/`review_required`/`stale_task`/
-`idempotency_conflict`→409 · `forbidden_action`/`forbidden_role`/`ai_forbidden`→403 ·
+Error → HTTP: `unknown_action`/`reason_required`→400 · `invalid_transition`/`review_required`/
+`stale_task`/`idempotency_conflict`→409 · `forbidden_action`/`forbidden_role`/`ai_forbidden`→403 ·
 `persist_failed`→500 · not found→404.
 
 ## Document linking — `POST portal-doc-complete` (extended; `FF_TASK_PILOT`)
 Body adds optional `taskId`. Storage existence is verified **fail-closed** first (a storage list error
-returns `502` — it is never treated as permission to proceed). When `taskId` is a valid UUID, the flag
-is on, and the caller is a participant borrower of that task, one **atomic RPC**
-(`ourmtg_document_finalize_submit`, EXT-5) validates document/task/loan/org + borrower participant +
-expected revision, marks the document `uploaded`, links it, transitions the task to `submitted`, and
-appends history + event — **all-or-nothing**. Any failure rolls back both the document and the task; the
-endpoint never reports `ok` after a partial failure. Without a `taskId` (or flag off) the legacy
-document-only flip runs. → `{ ok, documentId, status, taskTransition? }`.
+returns `502` — it is never treated as permission to proceed).
+
+**No legacy fallback once `taskId` is supplied (FCG #6):** the route is decided purely from `taskId` +
+flag — no `taskId` → the legacy document-only flip; a supplied `taskId` that is a bad UUID → `400`; a
+supplied `taskId` with the pilot flag off → `404` (**never** a silent legacy flip); a supplied valid
+`taskId` with the flag on → the task path.
+
+On the task path, one **atomic RPC** (`ourmtg_document_finalize_submit`, EXT-5 / FCG #1/#3/#7) validates
+document/task/loan/org, the acting borrower is the **targeted participant** (`not_participant` otherwise),
+and the **exact document binding** (a task already linked to one document rejects a different one with
+`document_binding_mismatch`); it accepts any borrower-actionable pre-submission state
+(`created|assigned|viewed|in_progress|rejected|more_information_needed|reopened` — the borrower's single
+submit action, so the lifecycle is executable end-to-end), then marks the document `uploaded`, links it,
+transitions the task to `submitted`, and appends history + event — **all-or-nothing**. Any failure rolls
+back both the document and the task; the endpoint never reports `ok` after a partial failure.
+→ `{ ok, documentId, status, taskTransition? }`.
 
 ## Borrower may / may not
 May: list **participant-visible** tasks, view a permitted task, `view`, `begin`, `submit`, upload linked

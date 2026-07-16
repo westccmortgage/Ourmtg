@@ -75,14 +75,16 @@ reject-with-reason, request more info, reopen, complete). Not a generic workflow
 / `VITE_FF_LOAN_TEAM_TASK_PILOT`. Notification model + AI remain disabled.
 
 ## Tests & PASS count
-**179 total / 179 pass / 0 fail** (post-EXT). New EXT suites: `orgAccess` (EXT-1 loan-scoped org),
-`featureFlags` (EXT-10 fail-closed), `requestGuard` (EXT-11 hardening + prototype-pollution),
-`idempotency` (EXT-8 key/hash). `taskRepo` was rewritten to the Rev 2 RPC contract and now covers EXT-4
-(stale/revision), EXT-5 (atomic finalize + rollback + cross-loan), EXT-6 (reason set/clear), EXT-7
-(participant visibility, two borrowers), EXT-8 (idempotency conflict), EXT-9 (one intent in-tx).
-`taskLabels` expanded for EXT-6. Existing task-service / AI-boundary / role-visibility suites unchanged.
-No external vendor calls; no production secrets; injected adapters + pure helpers only — **fake-adapter
-tests are NOT live-database tests.**
+**194 total / 194 pass / 0 fail** (post-EXT + Functional Completion Gate). EXT suites: `orgAccess`
+(EXT-1 loan-scoped org), `featureFlags` (EXT-10 fail-closed), `requestGuard` (EXT-11 hardening +
+prototype-pollution), `idempotency` (EXT-8 key/hash). `taskRepo` covers EXT-4 (stale/revision), EXT-5
+(atomic finalize + rollback + cross-loan), EXT-6 (reason set/clear), EXT-7 (participant visibility, two
+borrowers), EXT-8 (idempotency conflict), EXT-9 (one intent in-tx). FCG additions: required-reject-reason
+(RPC `reason_required`), no-duplicate-notification-intent on retry, cross-organization RPC-contract
+rejection (transition + finalize), and a structural no-send proof (`notificationIntent`). `taskLabels`
+expanded for EXT-6. Existing task-service / AI-boundary / role-visibility suites unchanged. No external
+vendor calls; no production secrets; injected adapters + pure helpers only — **fake-adapter tests are NOT
+live-database tests.**
 
 ## Build result
 `npm run build` **success** — JS 575.79 kB (gzip 175.62 kB); Vite >500 kB chunk **warning only**.
@@ -111,7 +113,7 @@ With flags off, the current portal is unchanged.
 1. `npm audit`: 3 (1 moderate, 2 high) unchanged — nodemailer (runtime; CRLF mitigated, upgrade to ^9 pending) + vite/esbuild (dev-only).
 2. Live-DB behavior of the RPCs/RLS is acceptance-scripted but not executed here.
 3. ~~Single-org pilot assumption~~ **RESOLVED (EXT-1):** `loan_files.organization_id` now exists; the gateway resolves a file's org from the file and supports multi-org users. Requires the EXT-13 backfill to report zero unprovisioned files before flags are enabled.
-4. Notification intents are recorded (best-effort) but nothing is sent.
+4. The Phase 1C **task**-notification model is intent-only: a `notification.queued` `loan_events` row is written in-transaction and **nothing is sent** (no email/SMS/push/webhook; proven structurally by `notificationIntent.test.mjs`). Note this is distinct from the **pre-existing** document-upload emails in `portal-doc-complete` (LO "a borrower uploaded" + borrower "we received your document"), which are unchanged Phase 1A/1B behavior and are NOT part of, or introduced by, the task-notification model.
 5. Full per-task upload wiring uses the existing checklist upload with a `?task` deep link; a dedicated per-task upload surface is a follow-up.
 6. Flags default off ⇒ pilot value is demonstrable only when enabled per-environment.
 

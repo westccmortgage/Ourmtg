@@ -11,7 +11,9 @@ implementation, the covering tests, and the test result.
 - **Migrations applied:** NONE.
 - **Live database tests:** NOT RUN (no isolated database provided). Fake-adapter tests are **not**
   represented as live-database tests.
-- **QA:** `npm run check` PASS · `npm test` **179/179** PASS · `npm run build` PASS.
+- **QA:** `npm run check` PASS · `npm test` **194/194** PASS · `npm run build` PASS (179 at the EXT
+  commit; +15 added by the subsequent Phase 1C Functional Completion Gate incl. the owner-approved
+  clarification defects — see `OURMTG-PHASE1C-FUNCTIONAL-COMPLETION.md`).
 - **Phase 1D:** NOT STARTED.
 
 ---
