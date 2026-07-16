@@ -1,28 +1,15 @@
-// POST /.netlify/functions/portal-doc-upload-url   (portal-user-authed, Bearer JWT)
-//
-// Mints a short-lived SIGNED UPLOAD URL into the PRIVATE 'ourmtg-docs' bucket for one
-// checklist document, and records/updates the loan_documents row. The client then
-// PUTs the file to the returned signed URL (supabase.storage.uploadToSignedUrl), and
-// afterwards calls portal-doc-complete to mark it uploaded.
-//
-// Body: { loanFileId, docKey }
-//
-// SECURITY (borrower financial data — strict)
-//   • BORROWER / CO-BORROWER only. Realtors are rejected (canSeeFinancials=false) so a
-//     realtor can never upload or touch borrower financial documents.
-//   • Access is validated against portal_access for THIS loan file.
-//   • docKey must be a valid slot for the file's loan type (isValidDocKey) — no
-//     arbitrary paths.
-//   • The storage path is SERVER-CONTROLLED: <owner>/<loanFile>/<docKey>-<rand>. The
-//     borrower cannot choose a path into another file/owner.
-//   • Private bucket only — never crm-media. Never touches app_state.
+// POST /.netlify/functions/portal-doc-upload-url
+// Mints a private signed upload URL. A task-linked request is fail-closed and must match
+// the exact required loan_documents row and authorized borrower participant.
 
 import { admin, isConfigured } from './_lib/supabase.mjs'
-import {
-  authUser, json, preflight, loadLoanFile, resolveAccess, canSeeFinancials, logAccess, randomToken, storageDocPath,
-} from './_lib/portal.mjs'
+import { authUser, json, preflight, loadLoanFile, resolveAccess, canSeeFinancials, logAccess, randomToken, storageDocPath } from './_lib/portal.mjs'
 import { isValidDocKey, labelForDocKey } from './_lib/checklist.mjs'
 import { validateUpload } from './_lib/upload-policy.mjs'
+import { readJsonBody, isUuid, docTaskLinkDecision } from './_lib/requestGuard.mjs'
+import { taskPilotEnabled } from './_lib/featureFlags.mjs'
+import { resolveTaskContext } from './_lib/orgAccess.mjs'
+import { createTaskRepo } from './_lib/taskRepo.mjs'
 
 const BUCKET = 'ourmtg-docs'
 
@@ -30,104 +17,100 @@ export default async (req) => {
   if (req.method === 'OPTIONS') return preflight()
   if (req.method !== 'POST') return json({ ok: false, error: 'Method not allowed' }, 405)
   if (!isConfigured()) return json({ ok: false, error: 'Service not configured' }, 503)
-
   const auth = await authUser(req)
   if (!auth) return json({ ok: false, error: 'Unauthorized' }, 401)
 
-  const body = await req.json().catch(() => ({}))
-  const loanFileId = String(body.loanFileId || '').trim()
+  const parsed = await readJsonBody(req)
+  if (!parsed.ok) return json({ ok: false, error: parsed.error }, parsed.status)
+  const body = parsed.body
+  if (!isUuid(body.loanFileId)) return json({ ok: false, error: 'Invalid loanFileId' }, 400)
   const docKey = String(body.docKey || '').trim()
-  if (!loanFileId || !docKey) return json({ ok: false, error: 'Missing loanFileId or docKey' }, 400)
+  if (!docKey) return json({ ok: false, error: 'Missing docKey' }, 400)
+  if (body.documentId != null && !isUuid(body.documentId)) return json({ ok: false, error: 'Invalid documentId' }, 400)
 
-  // Optional declared content type / filename hardening. The current client does not send
-  // these, so absence is allowed (backward compatible); when present, enforce the type
-  // allowlist and reject dangerous extensions (HTML/SVG/executables, double extensions).
-  // NOTE: this is a declared-type check, not content sniffing — see security report.
   if (body.contentType != null || body.filename != null) {
     const v = validateUpload({ contentType: body.contentType, filename: body.filename })
     if (!v.ok) return json({ ok: false, error: v.error }, 400)
   }
 
-  const svc = admin()
+  const route = docTaskLinkDecision(body.taskId, taskPilotEnabled())
+  if (route.mode === 'error') return json({ ok: false, error: route.error }, route.status)
+  if (route.mode === 'task' && !isUuid(body.documentId)) {
+    return json({ ok: false, error: 'A task upload requires the exact documentId' }, 400)
+  }
 
+  const svc = admin()
   let loanFile, access
   try {
-    loanFile = await loadLoanFile(svc, loanFileId)
+    loanFile = await loadLoanFile(svc, body.loanFileId)
     access = await resolveAccess(svc, auth.user.id, loanFile)
-  } catch (e) {
-    console.error('[portal-doc-upload-url]', e.message)
+  } catch {
+    console.error('[portal-doc-upload-url] authorization error')
     return json({ ok: false, error: 'Database error' }, 500)
   }
   if (!loanFile) return json({ ok: false, error: 'Loan file not found' }, 404)
-  if (!access) return json({ ok: false, error: 'No access to this loan file' }, 403)
-  // Realtors (and any non-financial visibility) can never upload borrower documents.
-  if (!canSeeFinancials(access.visibility)) {
-    return json({ ok: false, error: 'Not permitted to upload documents' }, 403)
+  if (!access || !canSeeFinancials(access.visibility)) return json({ ok: false, error: 'Not permitted to upload documents' }, 403)
+
+  let existing = null
+  if (body.documentId) {
+    const { data, error } = await svc.from('loan_documents')
+      .select('id, label, who, status, doc_key')
+      .eq('id', body.documentId).eq('loan_file_id', body.loanFileId).eq('doc_key', docKey)
+      .maybeSingle()
+    if (error) return json({ ok: false, error: 'Database error' }, 500)
+    if (!data) return json({ ok: false, error: 'Document request not found' }, 404)
+    existing = data
+  } else {
+    const { data, error } = await svc.from('loan_documents')
+      .select('id, label, who, status, doc_key')
+      .eq('loan_file_id', body.loanFileId).eq('doc_key', docKey)
+      .maybeSingle()
+    if (error) return json({ ok: false, error: 'Database error' }, 500)
+    existing = data || null
   }
 
-  // Validate the doc slot: either a standard checklist item for this loan type, or an
-  // existing loan_documents row (an ad-hoc request created via portal-doc-request).
-  // Look up the existing row first — it doubles as the custom-key allowlist.
-  const { data: existing } = await svc
-    .from('loan_documents')
-    .select('id, label')
-    .eq('loan_file_id', loanFileId).eq('doc_key', docKey)
-    .maybeSingle()
   if (!existing && !isValidDocKey({ loanType: loanFile.loan_type, purpose: loanFile.purpose }, docKey)) {
     return json({ ok: false, error: 'Unknown document type for this loan' }, 400)
   }
 
-  // Server-controlled path inside the private bucket (traversal-safe builder).
-  const rand = await randomToken(8)
-  const storagePath = storageDocPath(loanFile.owner_user_id, loanFileId, docKey, rand)
-
-  // Mint the signed upload URL (service role; private bucket).
-  const { data: signed, error: sErr } = await svc
-    .storage.from(BUCKET).createSignedUploadUrl(storagePath)
-  if (sErr) {
-    console.error('[portal-doc-upload-url] signed url failed:', sErr.message)
-    return json({ ok: false, error: 'Could not prepare upload' }, 500)
+  if (route.mode === 'task') {
+    const repo = createTaskRepo({ db: svc })
+    let task, ctx
+    try {
+      task = await repo.getTask(route.taskId)
+      ctx = await resolveTaskContext(svc, auth.user.id, loanFile, access)
+    } catch { return json({ ok: false, error: 'Database error' }, 500) }
+    if (!task) return json({ ok: false, error: 'Task not found' }, 404)
+    if (!ctx.ok || ctx.isInternal || task.organization_id !== ctx.organizationId) return json({ ok: false, error: 'Not permitted' }, 403)
+    if (!repo.borrowerCanSeeTask(task, auth.user.id)) return json({ ok: false, error: 'Not permitted' }, 403)
+    if (task.status !== 'in_progress') return json({ ok: false, error: 'Task is not ready for upload' }, 409)
+    if (task.required_document_id !== existing.id) return json({ ok: false, error: 'document_binding_mismatch' }, 409)
   }
 
-  // Upsert the loan_documents row for this (loanFile, docKey): point it at the new
-  // path, reset to 'requested' until the client confirms completion. One slot per
-  // docKey (re-upload replaces). Custom requests keep their LO-written label.
-  const label = existing?.label
-    || labelForDocKey({ loanType: loanFile.loan_type, purpose: loanFile.purpose }, docKey)
-  let documentId
+  const storagePath = storageDocPath(loanFile.owner_user_id, body.loanFileId, docKey, await randomToken(8))
+  const { data: signed, error: sErr } = await svc.storage.from(BUCKET).createSignedUploadUrl(storagePath)
+  if (sErr) return json({ ok: false, error: 'Could not prepare upload' }, 500)
 
+  const label = existing?.label || labelForDocKey({ loanType: loanFile.loan_type, purpose: loanFile.purpose }, docKey)
+  let documentId
   if (existing) {
     documentId = existing.id
-    await svc.from('loan_documents').update({
-      storage_path: storagePath, status: 'requested', label, uploaded_at: null, reviewed_at: null, reject_reason: null,
+    const { error } = await svc.from('loan_documents').update({
+      storage_path: storagePath, status: 'requested', label,
+      uploaded_at: null, reviewed_at: null, reject_reason: null,
     }).eq('id', existing.id)
+    if (error) return json({ ok: false, error: 'Could not record document' }, 500)
   } else {
-    const { data: ins, error: dErr } = await svc.from('loan_documents').insert({
-      loan_file_id: loanFileId,
-      owner_user_id: loanFile.owner_user_id,
-      doc_key: docKey,
-      label,
+    const { data: inserted, error } = await svc.from('loan_documents').insert({
+      loan_file_id: body.loanFileId, owner_user_id: loanFile.owner_user_id,
+      doc_key: docKey, label,
       who: access.visibility === 'coborrower' ? 'coborrower' : 'borrower',
-      status: 'requested',
-      storage_path: storagePath,
+      status: 'requested', storage_path: storagePath,
     }).select('id').maybeSingle()
-    if (dErr) {
-      console.error('[portal-doc-upload-url] doc insert failed:', dErr.message)
-      return json({ ok: false, error: 'Could not record document' }, 500)
-    }
-    documentId = ins.id
+    if (error) return json({ ok: false, error: 'Could not record document' }, 500)
+    documentId = inserted.id
   }
 
-  await logAccess(svc, {
-    portalUser: auth.user.id, loanFileId, action: 'upload_doc', target: docKey, req,
-  })
-
-  return json({
-    ok: true,
-    documentId,
-    bucket: BUCKET,
-    path: storagePath,
-    uploadUrl: signed.signedUrl,
-    token: signed.token,   // for supabase.storage.from(BUCKET).uploadToSignedUrl(path, token, file)
-  })
+  await logAccess(svc, { portalUser: auth.user.id, loanFileId: body.loanFileId, action: 'upload_doc', target: docKey, req })
+  return json({ ok: true, documentId, bucket: BUCKET, path: storagePath, uploadUrl: signed.signedUrl, token: signed.token })
 }
