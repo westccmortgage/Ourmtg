@@ -1,25 +1,13 @@
-// GET /.netlify/functions/portal-file-detail?loanFileId=<id>   (LO/owner-authed, Bearer JWT)
-//
-// Owner-only detail view behind the LO loan-file screen. The LO/owner has no RLS read
-// path to loan_documents (those policies are borrower/co-borrower only) and needs the
-// document IDs to accept/reject via portal-doc-review — this endpoint provides them,
-// plus short-lived signed download URLs so the LO can actually view each upload.
-//
-// Returns: { ok, file, documents[], conditions[], messages[] }
-//   • documents include a `downloadUrl` (300s signed) ONLY for uploaded/accepted docs.
-//
-// SECURITY
-//   • Caller MUST be the loan file's owner (resolveAccess role === 'owner'). Portal
-//     users (borrower/realtor) are rejected — they have their own scoped endpoints.
-//   • Reads loan_files / loan_documents / loan_conditions / loan_messages ONLY. Never
-//     app_state. Signed URLs are minted server-side on the private bucket after the
-//     owner check, mirroring portal-doc-upload-url.
+// GET /.netlify/functions/portal-file-detail?loanFileId=<id>   (LO/team-authenticated)
+// Returns the authorized loan-file detail, requested documents, borrower participants,
+// conditions and messages. Financial document links are short-lived signed URLs.
 
 import { admin, isConfigured } from './_lib/supabase.mjs'
 import { authUser, json, preflight, loadLoanFile, resolveAccess, isInternal, logAccess, stageInfo } from './_lib/portal.mjs'
+import { listBorrowerParticipants } from './_lib/orgAccess.mjs'
 
 const BUCKET = 'ourmtg-docs'
-const DOWNLOAD_TTL = 300 // seconds
+const DOWNLOAD_TTL = 300
 
 export default async (req) => {
   if (req.method === 'OPTIONS') return preflight()
@@ -29,26 +17,21 @@ export default async (req) => {
   const auth = await authUser(req)
   if (!auth) return json({ ok: false, error: 'Unauthorized' }, 401)
 
-  const url = new URL(req.url)
-  const loanFileId = String(url.searchParams.get('loanFileId') || '').trim()
+  const loanFileId = String(new URL(req.url).searchParams.get('loanFileId') || '').trim()
   if (!loanFileId) return json({ ok: false, error: 'Missing loanFileId' }, 400)
 
   const svc = admin()
-
   let loanFile, access
   try {
     loanFile = await loadLoanFile(svc, loanFileId)
     access = await resolveAccess(svc, auth.user.id, loanFile)
   } catch (e) {
-    console.error('[portal-file-detail]', e.message)
+    console.error('[portal-file-detail] read error')
     return json({ ok: false, error: 'Database error' }, 500)
   }
   if (!loanFile) return json({ ok: false, error: 'Loan file not found' }, 404)
-  if (!isInternal(access)) {
-    return json({ ok: false, error: 'Not authorized for this loan file' }, 403)
-  }
+  if (!isInternal(access)) return json({ ok: false, error: 'Not authorized for this loan file' }, 403)
 
-  // Documents for this file.
   const { data: docs, error: dErr } = await svc
     .from('loan_documents')
     .select('id, doc_key, label, who, status, storage_path, uploaded_at, reviewed_at, reject_reason')
@@ -56,7 +39,6 @@ export default async (req) => {
     .order('requested_at', { ascending: true })
   if (dErr) return json({ ok: false, error: 'Database error' }, 500)
 
-  // Short-lived signed download URLs for anything the borrower actually uploaded.
   const documents = []
   for (const d of docs || []) {
     let downloadUrl = null
@@ -77,6 +59,13 @@ export default async (req) => {
     })
   }
 
+  let participants = []
+  try { participants = await listBorrowerParticipants(svc, loanFileId) }
+  catch (e) {
+    console.error('[portal-file-detail] participant read error')
+    return json({ ok: false, error: 'Database error' }, 500)
+  }
+
   const [{ data: conditions }, { data: messages }] = await Promise.all([
     svc.from('loan_conditions')
       .select('id, title, detail, status, created_at, updated_at')
@@ -87,7 +76,6 @@ export default async (req) => {
   ])
 
   await logAccess(svc, { portalUser: auth.user.id, loanFileId, action: 'view_file', target: 'lo_detail', req })
-
   return json({
     ok: true,
     file: {
@@ -104,6 +92,7 @@ export default async (req) => {
       preapprovalExpires: loanFile.preapproval_expires || null,
     },
     documents,
+    participants,
     conditions: conditions || [],
     messages: messages || [],
   })
