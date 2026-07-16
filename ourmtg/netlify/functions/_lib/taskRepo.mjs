@@ -1,5 +1,7 @@
-// Phase 1C — server-side task repository. The pure state machine fast-fails invalid
-// actions; the database RPC remains authoritative for revision, relationship and atomic writes.
+// Phase 1C — server-side task repository. The pure state machine fast-fails current-state
+// mutations; the database RPC remains authoritative for revision, idempotency, relationship and
+// atomic writes. A retry carrying an older expected revision is allowed to reach the RPC so the
+// authoritative idempotency record can return the original result before stale-state validation.
 
 import { transitionTask, ACTION_TO_STATUS } from './taskLifecycle.mjs'
 
@@ -90,13 +92,18 @@ export function createTaskRepo({ db }) {
   async function transition({ task, action, actor, reason, borrowerVisibleReason, evidence, expectedRevision, correlationId, idempotencyKey, requestHash, at }) {
     const toStatus = ACTION_TO_STATUS[action]
     if (!toStatus) return { ok: false, error: 'unknown_action' }
-    const v = transitionTask(task, action, actor, { reason, evidence, at })
-    if (!v.ok) return v
+    const revision = expectedRevision ?? task.revision ?? 0
+    // Current mutations still fast-fail through the Phase 1B pure service. If the caller is
+    // replaying an older revision, defer to the RPC: it first checks the idempotency ledger and
+    // returns the original material result, otherwise it returns stale_task with zero writes.
+    if (Number(task.revision ?? 0) === Number(revision)) {
+      const v = transitionTask(task, action, actor, { reason, evidence, at })
+      if (!v.ok) return v
+    }
     let data, error
     try {
       ({ data, error } = await db.rpc('ourmtg_task_transition', {
-        p_task_id: task.id, p_action: action,
-        p_expected_revision: expectedRevision ?? task.revision ?? 0,
+        p_task_id: task.id, p_action: action, p_expected_revision: revision,
         p_actor_type: actor.type, p_actor_id: actor.id || null,
         p_organization_id: task.organization_id,
         p_reason: reason || null, p_borrower_visible_reason: borrowerVisibleReason || null,
