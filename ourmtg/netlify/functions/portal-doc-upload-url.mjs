@@ -19,9 +19,10 @@
 
 import { admin, isConfigured } from './_lib/supabase.mjs'
 import {
-  authUser, json, preflight, loadLoanFile, resolveAccess, canSeeFinancials, logAccess, randomToken,
+  authUser, json, preflight, loadLoanFile, resolveAccess, canSeeFinancials, logAccess, randomToken, storageDocPath,
 } from './_lib/portal.mjs'
 import { isValidDocKey, labelForDocKey } from './_lib/checklist.mjs'
+import { validateUpload } from './_lib/upload-policy.mjs'
 
 const BUCKET = 'ourmtg-docs'
 
@@ -37,6 +38,15 @@ export default async (req) => {
   const loanFileId = String(body.loanFileId || '').trim()
   const docKey = String(body.docKey || '').trim()
   if (!loanFileId || !docKey) return json({ ok: false, error: 'Missing loanFileId or docKey' }, 400)
+
+  // Optional declared content type / filename hardening. The current client does not send
+  // these, so absence is allowed (backward compatible); when present, enforce the type
+  // allowlist and reject dangerous extensions (HTML/SVG/executables, double extensions).
+  // NOTE: this is a declared-type check, not content sniffing — see security report.
+  if (body.contentType != null || body.filename != null) {
+    const v = validateUpload({ contentType: body.contentType, filename: body.filename })
+    if (!v.ok) return json({ ok: false, error: v.error }, 400)
+  }
 
   const svc = admin()
 
@@ -67,9 +77,9 @@ export default async (req) => {
     return json({ ok: false, error: 'Unknown document type for this loan' }, 400)
   }
 
-  // Server-controlled path inside the private bucket.
+  // Server-controlled path inside the private bucket (traversal-safe builder).
   const rand = await randomToken(8)
-  const storagePath = `${loanFile.owner_user_id}/${loanFileId}/${docKey}-${rand}`
+  const storagePath = storageDocPath(loanFile.owner_user_id, loanFileId, docKey, rand)
 
   // Mint the signed upload URL (service role; private bucket).
   const { data: signed, error: sErr } = await svc

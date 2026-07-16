@@ -24,17 +24,16 @@
 //   means ON CONFLICT DO UPDATE leaves the existing values intact (and they default
 //   to NULL on first insert). This keeps borrower/Realtor exposure under human control.
 //
-// INVOCATION (Phase 1A #4 — verified secret is the default authorization):
-//   • Preferred: an authenticated scheduler sends x-cron-secret: <CRON_SECRET>
-//     (or ?cron_secret=<CRON_SECRET>). Compared in constant time.
-//   • Netlify's platform scheduler (every 5 min) is honored ONLY if the operator sets
-//     CRON_ALLOW_NETLIFY_SCHEDULE=true (opting in to trust the x-netlify-event header).
-//   The work is light (DB read + batched upserts, no external sends), so it runs
-//   INLINE and time-boxed — no background dispatch needed. Deferred owners resume
-//   next tick (idempotent).
+// INVOCATION (Phase 1A Blocker B — verified Bearer secret is the ONLY authorization):
+//   An authenticated scheduler MUST send:
+//       Authorization: Bearer <OURMTG_CRON_SECRET>
+//   compared in constant time. Netlify's x-netlify-event header is diagnostic context
+//   only — it never authorizes. Fail-closed if OURMTG_CRON_SECRET is unset.
+//   The work is light (DB read + batched upserts, no external sends), so it runs INLINE
+//   and time-boxed — no background dispatch. Deferred owners resume next tick (idempotent).
 //
-// ENV: SUPABASE_URL, SUPABASE_SERVICE_ROLE, CRON_SECRET (required for the default path),
-//      CRON_ALLOW_NETLIFY_SCHEDULE (optional opt-in to trust Netlify's schedule header).
+// ENV: SUPABASE_URL, SUPABASE_SERVICE_ROLE, OURMTG_CRON_SECRET (required — the sole
+//      cron authorization).
 
 import { admin, isConfigured } from './_lib/supabase.mjs'
 import { authorizeCron, rejectionLog, heartbeat } from './_lib/cronGuard.mjs'

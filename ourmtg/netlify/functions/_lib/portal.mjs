@@ -19,8 +19,12 @@ export const CORS = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 }
 
+// Sensitive API responses must never be cached by browsers/proxies (Phase 1A §10).
 export const json = (body, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...CORS } })
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...CORS },
+  })
 
 export const preflight = () => new Response('', { status: 204, headers: CORS })
 

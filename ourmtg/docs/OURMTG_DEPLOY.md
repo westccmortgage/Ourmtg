@@ -59,15 +59,17 @@ them BEFORE deploying; changing them requires a redeploy.
 | `LEAD_INBOUND_URL` | GRCRM webhook URL | server (lead-submit proxy) |
 | `LEAD_INBOUND_TOKEN` | GRCRM lead_sources token | **SECRET — server only** |
 | `RESEND_PLATFORM_KEY` | Resend API key | optional; emails fail-soft without it |
-| `OURMTG_ADMIN_EMAILS` | comma-separated admin emails | **required to edit site settings** (Phase 1A #1); empty = no one can |
-| `CRON_SECRET` | long random string | **now the primary cron authorization** (Phase 1A #4); scheduler sends `x-cron-secret` |
-| `CRON_ALLOW_NETLIFY_SCHEDULE` | `true`/`false` | optional opt-in to trust Netlify's `x-netlify-event` header; default off |
+| `OURMTG_ADMIN_EMAILS` | comma-separated admin emails | **required to edit site settings** (Phase 1A Blocker A); empty = no one can |
+| `OURMTG_CRON_SECRET` | long random string | **SECRET — the sole cron authorization** (Phase 1A Blocker B); scheduler sends `Authorization: Bearer <secret>` |
+| `OURMTG_FINGERPRINT_SALT` | random per-deploy string | optional; salts the lead-submit rate-limit fingerprint (no raw IP stored) |
 | `LEAD_RATE_MAX` / `LEAD_RATE_WINDOW_MS` | numbers | optional lead-submit rate-limit tunables (default 5 / 60000) |
 
-> **Cron note (Phase 1A #4):** the projector no longer trusts the `x-netlify-event` header
-> by itself. Either (a) set `CRON_SECRET` and trigger `sync-loan-file` from an authenticated
-> scheduler that sends `x-cron-secret: <CRON_SECRET>`, or (b) set `CRON_ALLOW_NETLIFY_SCHEDULE=true`
-> to keep using Netlify's built-in scheduler. Do at least one, or the projector 403s every run.
+> **Cron note (Phase 1A Blocker B):** the projector authorizes **only** on a verified
+> `OURMTG_CRON_SECRET` presented as `Authorization: Bearer <secret>` (constant-time; never in
+> the query string; never logged). Netlify's `x-netlify-event` header is diagnostic context
+> only and never authorizes. Trigger `sync-loan-file` from an authenticated scheduler (e.g. a
+> GitHub Actions cron or uptime pinger) that sends the Bearer header — otherwise it 403s.
+> If `OURMTG_CRON_SECRET` is unset, the projector fail-closes (403 every run).
 
 Then: **Deploys → Trigger deploy → Clear cache and deploy site.**
 

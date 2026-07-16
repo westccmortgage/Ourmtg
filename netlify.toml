@@ -25,3 +25,34 @@
   from = "/*"
   to = "/index.html"
   status = 200
+
+# ── Security headers (Phase 1A §10) ──────────────────────────────────────────────
+# Applied to every response. The CSP is deliberately conservative but compatible with the
+# existing app: hashed self-hosted JS/CSS (no inline <script>), inline STYLE attributes
+# (React style={{}} — hence style-src 'unsafe-inline'), QR/icon data: URLs, and Supabase
+# for auth/storage/signed-URL fetches (https + wss *.supabase.co). Required external
+# origins are documented in docs/OURMTG-SECURITY-HEADERS.md — update the CSP if a new one
+# is added (e.g. analytics), or the app will break.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "geolocation=(), microphone=(), camera=(), interest-cohort=()"
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains"
+
+# Never cache API/function responses (they carry per-user financial data). Functions also
+# set Cache-Control: no-store themselves (_lib/portal.json); this is defense in depth.
+[[headers]]
+  for = "/.netlify/functions/*"
+  [headers.values]
+    Cache-Control = "no-store"
+    X-Content-Type-Options = "nosniff"
+
+# Long-cache the content-hashed static assets (safe: filenames change on content change).
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

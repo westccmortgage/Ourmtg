@@ -29,8 +29,11 @@ jobs:
       - name: Syntax-check functions
         run: npm run check
 
-      - name: Run tests (authz, cron, rate limit, domain contracts)
-        run: npm test
+      - name: Domain contract tests
+        run: npm run test:domain
+
+      - name: Security & authorization tests (Phase 1A)
+        run: npm run test:security
 
       - name: Build the SPA
         run: npm run build

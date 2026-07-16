@@ -42,11 +42,25 @@ export function sharedLimiter(opts) {
   return _shared
 }
 
-// Extract a best-effort client key (IP) from platform headers.
+// Extract a best-effort client IP from platform headers. Used ONLY as an input to the
+// privacy-conscious fingerprint below — never persisted or logged raw.
 export function clientKey(req) {
   const h = (n) => (req?.headers?.get ? req.headers.get(n) : req?.headers?.[n]) || ''
   const ip = (h('x-nf-client-connection-ip') || h('x-forwarded-for').split(',')[0] || '').trim()
   return ip || 'unknown'
+}
+
+// Privacy-conscious request fingerprint for rate limiting: a salted SHA-256 of IP + UA,
+// truncated. The RAW IP is never stored (only this one-way digest lives in the ephemeral,
+// short-TTL limiter map). A per-deploy salt (OURMTG_FINGERPRINT_SALT) makes digests
+// non-reversible across deploys. Deterministic for a given (ip, ua, salt) so the limiter
+// groups the same requester; different requesters get different keys.
+import { createHash } from 'node:crypto'
+export function requestFingerprint(req, salt = process.env.OURMTG_FINGERPRINT_SALT || 'ourmtg-default-salt') {
+  const h = (n) => (req?.headers?.get ? req.headers.get(n) : req?.headers?.[n]) || ''
+  const ip = clientKey(req)
+  const ua = String(h('user-agent') || '').slice(0, 200)
+  return createHash('sha256').update(`${salt}\n${ip}\n${ua}`).digest('hex').slice(0, 24)
 }
 
 // Honeypot check: a hidden form field real users never fill. If present and non-empty,

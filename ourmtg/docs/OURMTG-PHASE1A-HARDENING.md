@@ -1,5 +1,12 @@
 # OURMTG — Phase 1A: Security & Operational Hardening (delivery record)
 
+> **⚠️ SUPERSEDED.** This file records an interim hardening pass on branch
+> `claude/ourmtg-ai-operations-phase0-rebase`. The authoritative Phase 1A deliverable is
+> **`OURMTG-PHASE1A-SECURITY-REPORT.md`** on branch `claude/ourmtg-phase1a-security-foundation`.
+> Notably, the cron secret was renamed to **`OURMTG_CRON_SECRET`** and moved to an
+> `Authorization: Bearer` scheme (the `CRON_SECRET` / `CRON_ALLOW_NETLIFY_SCHEDULE` names below
+> are from this interim pass and no longer exist). Read the security report for current state.
+
 **Repo:** `westccmortgage/Ourmtg` · **Branch:** `claude/ourmtg-ai-operations-phase0-rebase`
 **Approved stack:** Vite · React · Netlify · Supabase (no Next.js/Vercel migration).
 **Scope:** hardening only — no new domain tables, no migrations applied, no deploy/merge, no prod env change, existing UI/workflows preserved.

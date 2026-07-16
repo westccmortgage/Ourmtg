@@ -1,36 +1,46 @@
-// Rate-limit & public-endpoint abuse-protection tests (Phase 1A #3/#5). Run: npm test
+// Rate-limit + fingerprint tests (Phase 1A Blocker C).
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  createRateLimiter, clientKey, isHoneypotTripped, validatePublicPayload, HONEYPOT_FIELD,
+  createRateLimiter, requestFingerprint, isHoneypotTripped, validatePublicPayload, HONEYPOT_FIELD,
 } from '../netlify/functions/_lib/ratelimit.mjs'
 
-test('limiter allows up to max, then blocks within the window', () => {
+function mkReq(headers = {}) {
+  const lower = {}
+  for (const [k, v] of Object.entries(headers)) lower[k.toLowerCase()] = v
+  return { headers: { get: (n) => lower[String(n).toLowerCase()] ?? null } }
+}
+
+test('limiter allows up to max then blocks within the window', () => {
   let t = 1000
   const rl = createRateLimiter({ windowMs: 1000, max: 2, now: () => t })
-  assert.equal(rl.check('ip1').allowed, true)  // 1
-  assert.equal(rl.check('ip1').allowed, true)  // 2
-  const blocked = rl.check('ip1')              // 3 → blocked
+  assert.equal(rl.check('k').allowed, true)
+  assert.equal(rl.check('k').allowed, true)
+  const blocked = rl.check('k')
   assert.equal(blocked.allowed, false)
   assert.ok(blocked.retryAfterMs > 0)
 })
 
-test('keys are independent', () => {
+test('keys are independent; window resets', () => {
   let t = 0
   const rl = createRateLimiter({ windowMs: 1000, max: 1, now: () => t })
   assert.equal(rl.check('a').allowed, true)
   assert.equal(rl.check('a').allowed, false)
-  assert.equal(rl.check('b').allowed, true) // different key unaffected
+  assert.equal(rl.check('b').allowed, true) // different requester not blocked
+  t += 1001
+  assert.equal(rl.check('a').allowed, true) // reset
 })
 
-test('window resets after windowMs', () => {
-  let t = 0
-  const rl = createRateLimiter({ windowMs: 1000, max: 1, now: () => t })
-  assert.equal(rl.check('a').allowed, true)
-  assert.equal(rl.check('a').allowed, false)
-  t += 1001 // advance past the window
-  assert.equal(rl.check('a').allowed, true)
+test('requestFingerprint: deterministic, differs by requester, contains no raw IP', () => {
+  const salt = 'unit-salt'
+  const a1 = requestFingerprint(mkReq({ 'x-nf-client-connection-ip': '1.2.3.4', 'user-agent': 'UA' }), salt)
+  const a2 = requestFingerprint(mkReq({ 'x-nf-client-connection-ip': '1.2.3.4', 'user-agent': 'UA' }), salt)
+  const b = requestFingerprint(mkReq({ 'x-nf-client-connection-ip': '9.9.9.9', 'user-agent': 'UA' }), salt)
+  assert.equal(a1, a2)                 // deterministic for same input+salt
+  assert.notEqual(a1, b)               // different IP → different key
+  assert.ok(!a1.includes('1.2.3.4'))   // raw IP never present in the digest
+  assert.match(a1, /^[0-9a-f]{24}$/)   // hex digest
 })
 
 test('validatePublicPayload: rejects empty and oversized, accepts normal', () => {
@@ -40,16 +50,9 @@ test('validatePublicPayload: rejects empty and oversized, accepts normal', () =>
   assert.equal(validatePublicPayload(null).ok, false)
 })
 
-test('honeypot: a filled hidden field trips; empty/absent does not', () => {
+test('honeypot: filled hidden field trips; empty/absent does not', () => {
   assert.equal(isHoneypotTripped({ [HONEYPOT_FIELD]: 'http://spam' }), true)
   assert.equal(isHoneypotTripped({ [HONEYPOT_FIELD]: '' }), false)
   assert.equal(isHoneypotTripped({ name: 'Ada' }), false)
   assert.equal(isHoneypotTripped(null), false)
-})
-
-test('clientKey extracts an IP from platform headers, falls back to unknown', () => {
-  const mk = (h) => ({ headers: { get: (n) => h[n.toLowerCase()] ?? null } })
-  assert.equal(clientKey(mk({ 'x-nf-client-connection-ip': '1.2.3.4' })), '1.2.3.4')
-  assert.equal(clientKey(mk({ 'x-forwarded-for': '9.9.9.9, 10.0.0.1' })), '9.9.9.9')
-  assert.equal(clientKey(mk({})), 'unknown')
 })

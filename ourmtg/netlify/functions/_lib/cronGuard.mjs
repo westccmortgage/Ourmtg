@@ -1,25 +1,25 @@
-// cronGuard.mjs — invocation gate for Netlify cron functions.
+// cronGuard.mjs — authorization gate for scheduled/cron functions (Phase 1A Blocker B).
 //
-// Phase 1A #4: header-trust is no longer the ONLY authorization. The default posture is a
-// VERIFIED SHARED SECRET (CRON_SECRET), compared in constant time. Netlify's platform
-// schedule header is accepted ONLY when the operator explicitly opts in via
-// CRON_ALLOW_NETLIFY_SCHEDULE=true — so a spoofed x-netlify-event header, on its own, no
-// longer authorizes anything unless that opt-in is deliberately set.
+// AUTHORIZATION MODEL
+//   The ONLY thing that authorizes a cron invocation is a verified shared secret,
+//   OURMTG_CRON_SECRET, presented as an HTTP Bearer credential:
+//       Authorization: Bearer <OURMTG_CRON_SECRET>
+//   Compared in constant time. Fail-closed: if the server secret is unset, NOTHING is
+//   authorized. The secret is NEVER read from the query string and is NEVER logged.
 //
-// authorizeCron(req, env) → { ok: boolean, reason: string }
-//   reason ∈ 'secret' | 'netlify-schedule-optin' | 'no-secret' | 'bad-secret' | 'not-scheduled'
+//   Netlify's platform schedule header (x-netlify-event) is retained ONLY as secondary
+//   CONTEXT for diagnostics (hasNetlifyScheduleSignal) — it never authorizes on its own.
 //
-// RECOMMENDED OPS SETUP (verified-secret, platform-independent):
-//   Set CRON_SECRET in the Netlify environment and trigger the projector from an
-//   authenticated scheduler (e.g. a GitHub Actions cron, an uptime pinger, or Netlify's
-//   scheduled function calling itself) that sends:
-//       x-cron-secret: <CRON_SECRET>            (or ?cron_secret=<CRON_SECRET>)
-//   Only if you intend to rely on Netlify's built-in scheduler AND accept its header as
-//   proof of origin, additionally set CRON_ALLOW_NETLIFY_SCHEDULE=true. Never expose
-//   CRON_SECRET publicly — treat it like a password.
+// authorizeCron(req, env) → { ok: boolean, reason: string, scheduled: boolean }
+//   reason ∈ 'ok' | 'no-secret' | 'no-bearer' | 'bad-secret'
+//   scheduled = whether Netlify's schedule signal was present (context only).
+//
+// OPS: set OURMTG_CRON_SECRET in the environment and trigger the projector from an
+// authenticated scheduler (GitHub Actions cron, uptime pinger, etc.) that sends the
+// Authorization: Bearer header. Treat the secret like a password; rotate on exposure.
 
-// Constant-time string comparison (avoids leaking secret length/prefix via timing).
-// Returns false unless both are non-empty strings of equal length with equal bytes.
+// Constant-time string comparison. Returns false unless both are non-empty equal-length
+// strings with identical bytes (no early exit on first mismatch).
 export function timingSafeEqualStr(a, b) {
   const x = typeof a === 'string' ? a : ''
   const y = typeof b === 'string' ? b : ''
@@ -36,62 +36,47 @@ function headerGet(req, name) {
   return req.headers[name] || ''
 }
 
-function presentedSecret(req) {
-  const h = headerGet(req, 'x-cron-secret')
-  if (h) return h
-  // Also accept ?cron_secret= for schedulers that can't set headers.
-  try {
-    const u = new URL(req.url || 'http://x/')
-    return u.searchParams.get('cron_secret') || ''
-  } catch { return '' }
+// Extract a Bearer token from the Authorization header. Returns '' if absent or if the
+// scheme is not exactly "Bearer" (case-insensitive scheme, exact single space).
+export function bearerToken(req) {
+  const raw = headerGet(req, 'authorization')
+  if (!raw) return ''
+  const m = /^Bearer[ ]([^\s].*)$/i.exec(raw.trim())
+  return m ? m[1].trim() : ''
 }
 
-// True if this looks like Netlify's platform scheduled invocation (header marker).
-// NOTE: this signal alone is NOT trusted unless CRON_ALLOW_NETLIFY_SCHEDULE=true.
+// Netlify platform schedule signal — CONTEXT ONLY, never authorization.
 export function hasNetlifyScheduleSignal(req) {
   return !!headerGet(req, 'x-netlify-event') || headerGet(req, 'x-nf-event') === 'schedule'
 }
 
-// Primary authorization decision. `env` defaults to process.env so callers can pass a
-// stub in tests.
+// Primary authorization decision. `env` defaults to process.env (inject a stub in tests).
 export function authorizeCron(req, env = process.env) {
-  const secret = env?.CRON_SECRET
-  const allowSchedule = String(env?.CRON_ALLOW_NETLIFY_SCHEDULE || '').toLowerCase() === 'true'
-
-  // 1) Verified shared secret — the default, preferred path.
-  if (secret && secret.length > 0) {
-    if (timingSafeEqualStr(presentedSecret(req), secret)) return { ok: true, reason: 'secret' }
-  }
-  // 2) Explicit operator opt-in to trust Netlify's platform schedule header.
-  if (allowSchedule && hasNetlifyScheduleSignal(req)) {
-    return { ok: true, reason: 'netlify-schedule-optin' }
-  }
-  // 3) Denied. Distinguish misconfiguration (no secret, no opt-in) from a bad attempt.
-  if (!secret && !allowSchedule) return { ok: false, reason: 'no-secret' }
-  if (secret && presentedSecret(req)) return { ok: false, reason: 'bad-secret' }
-  return { ok: false, reason: 'not-scheduled' }
+  const secret = env?.OURMTG_CRON_SECRET
+  const scheduled = hasNetlifyScheduleSignal(req)
+  if (!secret || String(secret).length === 0) return { ok: false, reason: 'no-secret', scheduled }
+  const token = bearerToken(req)
+  if (!token) return { ok: false, reason: 'no-bearer', scheduled }
+  if (!timingSafeEqualStr(token, String(secret))) return { ok: false, reason: 'bad-secret', scheduled }
+  return { ok: true, reason: 'ok', scheduled }
 }
 
-// Backward-compatible boolean wrapper (kept so existing imports keep working). Prefer
-// authorizeCron for the reason string.
-export function isScheduledInvocation(req) {
-  return authorizeCron(req).ok
-}
-
-// rejectionLog logs the header *keys* (NOT values) of a rejected request plus the reason,
-// so misfires are diagnosable in function logs without leaking secrets.
+// rejectionLog logs header *keys* (NOT values) + the reason, so misfires are diagnosable
+// without leaking the secret. Never logs the Authorization value.
 export function rejectionLog(req, label, reason) {
   const keys = req?.headers?.keys ? [...req.headers.keys()].join(', ') : ''
   console.warn(`[${label}] Forbidden (${reason || 'unauthorized'}). Received header keys: ${keys}`)
 }
 
-// heartbeat records "this cron ran" in cron_heartbeat so ops can verify the scheduler
-// actually gets past the gate (vs silently 403ing). Best-effort: never throws.
+// heartbeat records "this cron ran" in cron_heartbeat so ops can verify the scheduler gets
+// past the gate. Best-effort: never throws, never affects the cron's result. NOTE:
+// cron_heartbeat is NOT created by migrations 036–039 — this write fail-soft-swallows a
+// missing-table error (see OURMTG_DEPLOY.md and draft 042).
 export async function heartbeat(db, name, note) {
   try {
     await db.from('cron_heartbeat').upsert(
       { name, last_run: new Date().toISOString(), ...(note ? { note } : {}) },
       { onConflict: 'name' },
     )
-  } catch { /* non-fatal */ }
+  } catch { /* non-fatal — table may not exist yet */ }
 }

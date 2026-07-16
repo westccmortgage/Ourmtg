@@ -1,67 +1,73 @@
-// Cron authorization contract tests (Phase 1A #4).
-// Verifies verified-secret is the default and header-trust is opt-in only. Run: npm test
+// Cron authorization tests (Phase 1A Blocker B). Bearer secret is the sole authorization.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { authorizeCron, timingSafeEqualStr, hasNetlifyScheduleSignal } from '../netlify/functions/_lib/cronGuard.mjs'
+import { authorizeCron, timingSafeEqualStr, bearerToken, hasNetlifyScheduleSignal } from '../netlify/functions/_lib/cronGuard.mjs'
 
-// Minimal Request-like stub: headers.get + url.
-function mkReq(headers = {}, url = 'http://fn/.netlify/functions/sync-loan-file') {
+function mkReq(headers = {}) {
   const lower = {}
   for (const [k, v] of Object.entries(headers)) lower[k.toLowerCase()] = v
-  return { headers: { get: (n) => lower[String(n).toLowerCase()] ?? null }, url }
+  return { headers: { get: (n) => lower[String(n).toLowerCase()] ?? null } }
 }
+const SECRET = 's3cret-value-123'
 
-test('timingSafeEqualStr: equal non-empty strings match; others do not', () => {
-  assert.equal(timingSafeEqualStr('s3cret', 's3cret'), true)
-  assert.equal(timingSafeEqualStr('s3cret', 's3creT'), false)
-  assert.equal(timingSafeEqualStr('ab', 'abc'), false) // length differs
-  assert.equal(timingSafeEqualStr('', ''), false)      // empty never matches
-  assert.equal(timingSafeEqualStr('x', undefined), false)
+test('timingSafeEqualStr: equal non-empty match; length/empty/diff do not', () => {
+  assert.equal(timingSafeEqualStr(SECRET, SECRET), true)
+  assert.equal(timingSafeEqualStr(SECRET, SECRET + 'x'), false)
+  assert.equal(timingSafeEqualStr('', ''), false)
+  assert.equal(timingSafeEqualStr('a', undefined), false)
 })
 
-test('valid secret via header authorizes (reason: secret)', () => {
-  const r = authorizeCron(mkReq({ 'x-cron-secret': 's3cret' }), { CRON_SECRET: 's3cret' })
-  assert.deepEqual(r, { ok: true, reason: 'secret' })
+test('bearerToken parses only the Bearer scheme', () => {
+  assert.equal(bearerToken(mkReq({ authorization: `Bearer ${SECRET}` })), SECRET)
+  assert.equal(bearerToken(mkReq({ authorization: `bearer ${SECRET}` })), SECRET) // scheme case-insensitive
+  assert.equal(bearerToken(mkReq({ authorization: `Basic ${SECRET}` })), '')      // wrong scheme
+  assert.equal(bearerToken(mkReq({})), '')
 })
 
-test('valid secret via ?cron_secret query authorizes', () => {
-  const r = authorizeCron(mkReq({}, 'http://fn/x?cron_secret=s3cret'), { CRON_SECRET: 's3cret' })
-  assert.equal(r.ok, true)
-  assert.equal(r.reason, 'secret')
+// (1) no header → denied
+test('no Authorization header → denied', () => {
+  assert.deepEqual(authorizeCron(mkReq({}), { OURMTG_CRON_SECRET: SECRET }), { ok: false, reason: 'no-bearer', scheduled: false })
 })
 
-test('wrong secret is denied (reason: bad-secret)', () => {
-  const r = authorizeCron(mkReq({ 'x-cron-secret': 'nope' }), { CRON_SECRET: 's3cret' })
-  assert.deepEqual(r, { ok: false, reason: 'bad-secret' })
+// (2) wrong scheme → denied
+test('wrong auth scheme → denied (no-bearer)', () => {
+  const r = authorizeCron(mkReq({ authorization: `Basic ${SECRET}` }), { OURMTG_CRON_SECRET: SECRET })
+  assert.equal(r.ok, false); assert.equal(r.reason, 'no-bearer')
 })
 
-test('secret configured but none presented is denied (reason: not-scheduled)', () => {
-  const r = authorizeCron(mkReq({}), { CRON_SECRET: 's3cret' })
-  assert.deepEqual(r, { ok: false, reason: 'not-scheduled' })
+// (3) wrong secret → denied
+test('wrong secret → denied (bad-secret)', () => {
+  const r = authorizeCron(mkReq({ authorization: 'Bearer nope' }), { OURMTG_CRON_SECRET: SECRET })
+  assert.equal(r.ok, false); assert.equal(r.reason, 'bad-secret')
 })
 
-test('NO trust of x-netlify-event header alone when opt-in is off', () => {
-  // This is the core Phase 1A #4 fix: header-trust is not the default.
-  const r = authorizeCron(mkReq({ 'x-netlify-event': 'schedule' }), { CRON_SECRET: 's3cret' })
+// (4) correct secret → allowed
+test('correct Bearer secret → allowed', () => {
+  const r = authorizeCron(mkReq({ authorization: `Bearer ${SECRET}` }), { OURMTG_CRON_SECRET: SECRET })
+  assert.equal(r.ok, true); assert.equal(r.reason, 'ok')
+})
+
+// (5) missing server secret → fail closed
+test('server secret unset → fail closed (no-secret) even with a Bearer', () => {
+  const r = authorizeCron(mkReq({ authorization: `Bearer ${SECRET}` }), {})
+  assert.equal(r.ok, false); assert.equal(r.reason, 'no-secret')
+})
+
+// (6) spoofed platform header without secret → denied
+test('Netlify schedule header alone never authorizes', () => {
+  const r = authorizeCron(mkReq({ 'x-netlify-event': 'schedule' }), { OURMTG_CRON_SECRET: SECRET })
   assert.equal(r.ok, false)
+  assert.equal(r.scheduled, true) // header noted as context only
 })
 
-test('Netlify schedule header authorizes ONLY with explicit opt-in', () => {
-  const optIn = { CRON_ALLOW_NETLIFY_SCHEDULE: 'true' }
-  assert.equal(authorizeCron(mkReq({ 'x-netlify-event': 'schedule' }), optIn).ok, true)
-  assert.equal(authorizeCron(mkReq({ 'x-netlify-event': 'schedule' }), optIn).reason, 'netlify-schedule-optin')
-  // Opt-in off (default) → the same header does not authorize.
-  assert.equal(authorizeCron(mkReq({ 'x-netlify-event': 'schedule' }), { CRON_ALLOW_NETLIFY_SCHEDULE: 'false' }).ok, false)
-})
-
-test('no secret and no opt-in is a fail-closed misconfiguration (reason: no-secret)', () => {
-  const r = authorizeCron(mkReq({ 'x-netlify-event': 'schedule' }), {})
-  assert.deepEqual(r, { ok: false, reason: 'no-secret' })
-})
-
-test('hasNetlifyScheduleSignal detects both header markers', () => {
+test('hasNetlifyScheduleSignal is context only', () => {
   assert.equal(hasNetlifyScheduleSignal(mkReq({ 'x-netlify-event': 'schedule' })), true)
-  assert.equal(hasNetlifyScheduleSignal(mkReq({ 'x-nf-event': 'schedule' })), true)
   assert.equal(hasNetlifyScheduleSignal(mkReq({})), false)
+})
+
+// (7) secret never appears in the authorization decision object (no echo/leak)
+test('authorization result never contains the secret value', () => {
+  const r = authorizeCron(mkReq({ authorization: `Bearer ${SECRET}` }), { OURMTG_CRON_SECRET: SECRET })
+  assert.ok(!JSON.stringify(r).includes(SECRET))
 })

@@ -8,13 +8,10 @@
 //     even if the "you got a lead" email fails).
 //   • If RESEND_PLATFORM_KEY is absent (local/dev) we no-op and return {ok:false,skipped}.
 //   • All user-supplied strings MUST be passed through esc() before interpolation.
+//   • Header-bound fields (to/subject/replyTo) pass through sanitizeHeader() to strip
+//     CR/LF/control chars (SMTP header-injection defense; see Phase 1A security report).
 import nodemailer from 'nodemailer'
 
-// Sender is configurable: MAIL_FROM must be an address on a domain VERIFIED in the
-// Resend account (DKIM/SPF), or sends fail. Default reuses grcrm.com (already
-// verified for the shared RESEND_PLATFORM_KEY) but with the borrower-facing brand
-// as the display name. Once ourmtg.com is verified in Resend, set
-// MAIL_FROM='West Coast Capital Mortgage <hello@ourmtg.com>'.
 const FROM = process.env.MAIL_FROM || 'West Coast Capital Mortgage <admin@grcrm.com>'
 const APP_URL = (process.env.OURMTG_URL || 'https://ourmtg.com').replace(/\/$/, '')
 
@@ -22,6 +19,16 @@ export function esc(str) {
   return String(str == null ? '' : str)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+}
+
+// Strip CR/LF and other control characters from any value bound for an email HEADER
+// (to / subject / replyTo). This neutralizes SMTP/header CRLF-injection in OUR usage
+// regardless of the nodemailer version (the nodemailer <=9 HIGH advisories still apply —
+// the dependency should be upgraded; this is defense-in-depth, not a CVE fix).
+// Accepts a string or an array of addresses; returns the same shape, sanitized.
+export function sanitizeHeader(value) {
+  const clean = (s) => String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 998)
+  return Array.isArray(value) ? value.map(clean).filter(Boolean) : clean(value)
 }
 
 // Branded HTML shell. `bodyHtml` is trusted (built from esc()'d parts by callers).
@@ -64,6 +71,11 @@ export async function sendPlatformEmail({ to, subject, html, text, replyTo }) {
   const key = process.env.RESEND_PLATFORM_KEY
   if (!key) return { ok: false, skipped: 'RESEND_PLATFORM_KEY not set' }
   if (!to || !subject || !html) return { ok: false, error: 'Missing to/subject/html' }
+  // Sanitize header-bound fields before they reach the SMTP layer (CRLF-injection defense).
+  const safeTo = sanitizeHeader(to)
+  const safeSubject = sanitizeHeader(subject)
+  const safeReplyTo = replyTo ? sanitizeHeader(replyTo) : null
+  if (!safeTo || (Array.isArray(safeTo) && safeTo.length === 0)) return { ok: false, error: 'Invalid recipient' }
   let transport
   try {
     transport = nodemailer.createTransport({
@@ -72,8 +84,8 @@ export async function sendPlatformEmail({ to, subject, html, text, replyTo }) {
       connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000,
     })
     await transport.sendMail({
-      from: FROM, to, subject,
-      ...(replyTo ? { replyTo } : {}),
+      from: FROM, to: safeTo, subject: safeSubject,
+      ...(safeReplyTo ? { replyTo: safeReplyTo } : {}),
       html,
       ...(text ? { text } : {}),
     })
