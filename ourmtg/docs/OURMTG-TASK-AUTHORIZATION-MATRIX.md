@@ -1,51 +1,40 @@
-# OURMTG — Task Authorization Matrix (Phase 1C, external-review hardened)
+# OURMTG — Task Authorization Matrix (Phase 1C)
 
-Server-enforced (fail-closed server flag + JWT + loan-scoped org membership + `resolveAccess` + pure
-task service + authoritative RPC). Frontend gating is not security. Cross-org and guessed-ID requests
-are denied. Tested in `tests/taskRepo.test.mjs`, `tests/orgAccess.test.mjs`, `tests/featureFlags.test.mjs`,
-`tests/requestGuard.test.mjs`, `tests/idempotency.test.mjs`, `tests/taskService.test.mjs`,
-`tests/access.test.mjs`, `tests/roleVisibility.test.mjs`.
+Authorization is server-enforced through fail-closed feature flags, verified JWT, `resolveAccess`, loan-scoped organization context, explicit participant audience, repository validation and service-role-only RPCs. Frontend visibility is not an authorization control.
 
-| Capability | Borrower/Co-borrower (own file) | Realtor | Escrow/Title | Loan team (org member) | Admin |
+| Capability | Borrower / Co-borrower | Realtor | Escrow / Title | Authorized loan team | Platform admin |
 |---|---|---|---|---|---|
-| List tasks | own **participant-scoped** borrower tasks, scrubbed | ❌ | ❌ (only explicitly permitted transaction tasks) | ✅ full | ✅ |
-| View task detail | own, scrubbed (no history), only if a participant | ❌ | ❌ | ✅ + history | ✅ |
-| See `internal_requirement` | ❌ | ❌ | ❌ | ✅ | ✅ |
-| See `borrower_visible_status_reason` | ✅ (own) | ❌ | ❌ | ✅ | ✅ |
-| Create task | ❌ | ❌ | ❌ | ✅ (must pick participant/shared) | ✅ |
-| Assign | ❌ | ❌ | ❌ | ✅ | ✅ |
-| Mark viewed / begin / submit | ✅ (own) | ❌ | ❌ | ✅ | ✅ |
-| Upload linked document | ✅ (own, atomic finalize) | ❌ | ❌ | ✅ | ✅ |
-| Accept / reject / more-info | ❌ | ❌ | ❌ | ✅ (reason required for reject/more-info) | ✅ |
-| Complete (review-required) | ❌ | ❌ | ❌ | ✅ (only from team_review) | ✅ |
-| Reopen / cancel | ❌ | ❌ | ❌ | ✅ | ✅ |
-| Task targeted to another borrower | ❌ (not visible) | ❌ | ❌ | ✅ | ✅ |
-| Cross-organization access | denied (`403`) | denied | denied | denied | n/a |
-| AI actor (any action) | denied (`ai_forbidden`) — AI may only propose | | | | |
-| Any action with the server flag OFF | `404` (fail-closed, EXT-10) | `404` | `404` | `404` | `404` |
+| List tasks | shared tasks and tasks specifically targeted to the authenticated participant; scrubbed fields | ❌ | ❌ | full rows for authorized file/org | no implicit file access |
+| View task detail | own/shared scrubbed task; no history | ❌ | ❌ | full task + history | separate platform role |
+| See internal requirement/reason/evidence/metadata | ❌ | ❌ | ❌ | ✅ | only with separate file authorization |
+| See borrower-visible status reason | ✅ own/shared | ❌ | ❌ | ✅ | only with separate file authorization |
+| Create task | ❌ | ❌ | ❌ | ✅, exact participant/shared audience + exact document | no ownership bypass |
+| Assign task | ❌ | ❌ | ❌ | create RPC assigns; later assign only when lifecycle permits | no ownership bypass |
+| Mark viewed / begin | ✅ own/shared | ❌ | ❌ | valid lifecycle only | no ownership bypass |
+| Upload linked document | ✅ own/shared, exact required document only | ❌ | ❌ | review/request flow only | no ownership bypass |
+| Submit through linked finalize | ✅ only from `in_progress` | ❌ | ❌ | n/a | n/a |
+| Send to review / accept / reject / more info | ❌ | ❌ | ❌ | ✅ valid lifecycle; safe reason required where applicable | no ownership bypass |
+| Complete / reopen / cancel | ❌ | ❌ | ❌ | ✅ valid lifecycle; reopen requires safe reason | no ownership bypass |
+| Task targeted to another participant | not visible / not actionable | ❌ | ❌ | visible on authorized file | n/a |
+| Shared task | visible/actionable to approved borrower participants | ❌ | ❌ | visible | n/a |
+| Cross-file / cross-org | denied | denied | denied | denied unless separately authorized in that org/file | denied |
+| AI actor mutation | denied (`ai_forbidden`) | | | | |
+| Relevant server flag off | unavailable (`404`) | unavailable | unavailable | unavailable | unavailable |
 
-Guarantees:
-- **EXT-10 fail-closed:** with `FF_TASK_PILOT` / `FF_LOAN_TEAM_TASK_PILOT` unset, every task endpoint
-  returns `404`. `VITE_FF_*` is presentation-only and authorizes nothing.
-- **EXT-1 loan-scoped org:** the org comes from the loan file; internal callers must be active members
-  of that org; borrowers/co-borrowers ride `portal_access` with no membership; a multi-org user is
-  resolved against the file's org; cross-org (membership in a different org) is denied.
-- **EXT-2 no borrower base SELECT:** `anon`/`authenticated` cannot read `loan_tasks`/`loan_events`/
-  `loan_task_history` directly; the borrower reads only through the gateway. **EXT-3:** RPCs are
-  `service_role`-only.
-- **EXT-7 participant targeting:** a borrower sees a task only if it is shared, targeted to them, or
-  untargeted; a task targeted to another borrower is not visible. Proven with two borrower identities on
-  one loan.
-- Borrower cannot accept their own submitted document (accept is team-only; review-required tasks reach
-  `accepted` only from `team_review`).
-- **EXT-4 concurrency / EXT-8 idempotency:** a stale write (`revision` mismatch) is rejected with zero
-  writes; a duplicate key + same payload is deduped; a duplicate key + different payload is
-  `idempotency_conflict`.
-- `internal_requirement` and internal evidence/notes never appear in any borrower API response
-  (`scrubTaskForBorrower`); `borrower_visible_status_reason` is the only reason the borrower sees.
-- A guessed loan-file/task id without a grant resolves to no access (`resolveAccess → null`). Cross-org:
-  the gateway rejects when the task/file org ≠ the caller's active membership; the RPC re-checks
-  (`org_mismatch`).
+## Guarantees
 
-This supplements `OURMTG-ENDPOINT-AUTHORIZATION-MATRIX.md` (1A) with the four `portal-task-*` endpoints
-and the extended `portal-doc-complete`.
+- Organization is resolved from `loan_files.organization_id`.
+- Internal callers need active organization membership in addition to existing file access.
+- Borrowers/co-borrowers need the file-specific `portal_access` grant, not organization membership.
+- A specific task has a verified `responsible_user_id` and DB-derived borrower/co-borrower type.
+- A shared task has `responsible_user_id IS NULL` and `shared_with_borrowers=true`.
+- There is no implicit untargeted borrower-visible audience.
+- Document tasks require an exact `required_document_id` on the same loan; signed upload and finalize enforce it again.
+- Browser roles cannot select `loan_tasks`, `loan_events` or `loan_task_history` directly.
+- Borrower responses never include internal requirement, internal reason/evidence, metadata, creator or responsible-user identifiers.
+- Borrowers cannot accept/reject/complete their own task.
+- Stale distinct operations write nothing; same-key/same-hash retries return the original material result; key reuse with changed material conflicts.
+- Task-linked upload/finalize calls no external delivery provider; it records only an in-transaction notification intent.
+- Platform-settings administration remains separate from loan-file access and does not confer task access.
+
+Coverage is provided by `taskRepo.test.mjs`, `taskRepoRegression.test.mjs`, `orgAccess.test.mjs`, `roleVisibility.test.mjs`, `featureFlags.test.mjs`, `pendingOps.test.mjs`, `taskUi.test.mjs`, `functionalCompletionContract.test.mjs` and `sqlLifecycleParity.test.mjs`. Live database/RLS acceptance remains unrun.
