@@ -1,151 +1,157 @@
-# OURMTG — Phase 1C Report (Operational Pilot Wiring)
+# OURMTG — Phase 1C Report (Operational Pilot)
 
-## Verified repository & branch
-- Repository: `westccmortgage/Ourmtg` (verified: clean tree, not `main`, `ef8bb68` ancestor).
-- Branch: `claude/ourmtg-phase1c-operational-pilot` · **Base commit** `ef8bb68` · **New commit**: see git log at delivery.
-- **Baseline re-verified before changes:** `npm ci` ok · `check` ok · `npm test` **114/114** · `build` success.
+## Status
 
-## Mission delivered
-The first production-shaped vertical slice: **team creates a borrower document task → borrower sees
-it → opens it → uploads the document → task moves to submitted → team reviews (accept / reject /
-request more info) → borrower sees the result**, with **every material transition writing an
-immutable event + task-history row atomically**. Flag-gated (default off); migration written, NOT applied.
+- Repository: `westccmortgage/Ourmtg`
+- Branch: `claude/ourmtg-phase1c-operational-pilot`
+- PR: #1, base `main`, open and unmerged
+- Feature flags: default off
+- Migration 043: review source only, **not applied**
+- Production deployment: none
+- Phase 1D: not started
 
-## External-findings reconciliation (EXT-1 … EXT-13)
-This report predates the external review. The authoritative, per-finding reconciliation for EXT-1 through
-EXT-13 (status, files, implementation, tests, results) is **`OURMTG-PHASE1C-EXT-RECONCILIATION.md`**. The
-migration is now **Rev 2** (3 service_role-only RPCs, loan-scoped org via `loan_files.organization_id`,
-revision-based concurrency, request-hash idempotency, in-transaction notification intents, `ON DELETE
-RESTRICT` audit protection, deterministic slug backfill). The self-review `OURMTG-PHASE1C-REVIEW-FIXES.md`
-(F1–F13) is a **separate** document and is not the external findings.
+The authoritative functional-completion record is `OURMTG-PHASE1C-FUNCTIONAL-COMPLETION.md`. External findings remain mapped in `OURMTG-PHASE1C-EXT-RECONCILIATION.md`; the earlier self-review remains separate in `OURMTG-PHASE1C-REVIEW-FIXES.md`.
 
-## Exact files changed
-**New (backend):** `docs/phase1c/migration/043_ourmtg_operational_pilot.sql`;
-`netlify/functions/_lib/{orgAccess,taskRepo,notificationIntent}.mjs`;
-`netlify/functions/{portal-task-list,portal-task-detail,portal-task-create,portal-task-transition}.mjs`.
-**Modified (backend):** `netlify/functions/portal-doc-complete.mjs` (optional `taskId` → submit-on-finalize).
-**New (frontend):** `src/lib/taskLabels.js`; `src/components/TeamTaskCard.jsx`.
-**Modified (frontend):** `src/lib/api.js` (task wrappers + `uploadDocument(taskId)`); `src/domain/flags.js`
-(`taskPilot`, `loanTeamTaskPilot`); `src/components/NeedsAttention.jsx` (real tasks + fallback);
-`src/pages/{BorrowerDashboard,LoanFileDetail,Documents}.jsx`.
-**New (tests):** `tests/{taskRepo,taskLabels,notificationIntent}.test.mjs`.
-**New (docs):** `OURMTG-PHASE1C-ARCHITECTURE.md`, `OURMTG-PHASE1C-DATA-MIGRATION.md`, `OURMTG-TASK-API.md`,
-`OURMTG-TASK-AUTHORIZATION-MATRIX.md`, `OURMTG-TASK-PILOT-ACCEPTANCE.md`, this report; cash-to-close adapter appendix.
+## Delivered vertical slice
 
-## Migration files created / migrations applied
-Created: `docs/phase1c/migration/043_ourmtg_operational_pilot.sql` (organizations, organization_members,
-loan_events, loan_tasks, loan_task_history + `ourmtg_task_create`/`ourmtg_task_transition` RPCs; FKs,
-org boundary, indexes, `unique(organization_id, idempotency_key)`, append-only triggers, updated_at,
-RLS, backfill, validation, rollback). **Migrations applied: NONE.** Outside `supabase/migrations/`; branch-only per acceptance doc.
+```text
+loan team creates and assigns a task for a verified borrower audience
+→ borrower opens it (viewed)
+→ borrower enters the exact document flow (in_progress)
+→ signed upload is minted only for the bound document request
+→ atomic finalize writes document uploaded + task submitted + history + event + intent
+→ loan team sends to review
+→ loan team accepts, rejects, or requests more information
+→ borrower sees only the safe borrower-visible result
+```
 
-## Transaction / RPC design
-**Three** `SECURITY DEFINER`, `service_role`-only RPCs (Rev 2) perform the atomic writes.
-`ourmtg_task_transition` takes an action + expected revision, locks the task `FOR UPDATE`, rejects a
-`revision` mismatch (`stale_task`), re-validates the graph, **derives** the to-status + event server-side,
-bumps the revision, and appends `loan_task_history` + `loan_events` (and a same-transaction notification
-intent on reject/more-info) in **one transaction**. `ourmtg_task_create` and
-`ourmtg_document_finalize_submit` are likewise atomic. Any failure RAISES and rolls back. Idempotency is a
-mandatory key + `request_hash` (same key + same payload dedupes; different payload → `idempotency_conflict`).
-Validation is also delegated to the canonical pure Phase 1B task service BEFORE the RPC for fast-fail. No
-independent client-side history/event inserts.
+All Phase 1C task mutations pass through the server repository and service-role-only atomic RPCs. No endpoint or UI writes task state directly.
 
-## Endpoints added
-`portal-task-list`, `portal-task-detail`, `portal-task-create`, `portal-task-transition` (+ extended
-`portal-doc-complete`). No raw table CRUD exposed. See `OURMTG-TASK-API.md`.
+## Database and RPC design
 
-## Authorization matrix
-See `OURMTG-TASK-AUTHORIZATION-MATRIX.md`. Borrower: list/view own scrubbed tasks, view/begin/submit,
-upload; NOT create/assign/accept/reject/complete, and never sees `internal_requirement`. Team: full
-lifecycle on org files. Realtor/escrow/title: no financial/document tasks. Cross-org + guessed-id denied.
-AI: no action (proposer only). Admin: separate from loan/task access.
+Migration source: `docs/phase1c/migration/043_ourmtg_operational_pilot.sql`.
 
-## Borrower pilot behavior (`VITE_FF_TASK_PILOT`, default off)
-"Needs your attention" renders real `loan_tasks` first (title, explanation, due date, blocking, action),
-with a safe fallback to the derived checklist behavior when off/empty. Statuses are plain-language, EN/ES/RU.
-Upload deep-links to the secure Documents flow (`?task=<id>`) which links the finalize to the task. No
-fabricated tasks; internal fields never rendered.
+It defines:
 
-## Loan-team pilot behavior (`VITE_FF_LOAN_TEAM_TASK_PILOT`, default off)
-A focused card on the loan file: create ONE borrower document task (title, explanation, internal
-requirement, due date, blocking, expected doc type), and review submitted tasks (to-review, accept,
-reject-with-reason, request more info, reopen, complete). Not a generic workflow builder.
+- `organizations` with unique stable slug;
+- `organization_members`;
+- additive, backfilled, validated `loan_files.organization_id`;
+- append-only `loan_events`;
+- `loan_tasks` with revision, safe borrower reason, explicit audience, `required_document_id`, submitted document reference and soft archive;
+- append-only `loan_task_history`;
+- canonical lifecycle/event/role helper functions;
+- atomic create+assign, transition, and exact-document-finalize RPCs.
+
+The migration:
+
+- is outside the active migration directory;
+- has not been applied;
+- revokes browser access to operational base tables;
+- grants RPC execution only to `service_role`;
+- uses `ON DELETE RESTRICT` for operational audit retention;
+- performs deterministic WCC organization preflight/upsert/backfill and stops on mismatches;
+- requires live isolated-branch acceptance before any promotion.
+
+## Lifecycle
+
+The canonical path is:
+
+```text
+created → assigned → viewed → in_progress → submitted → team_review
+                                                    ↘ rejected / more_information_needed
+team_review → accepted → completed
+accepted / completed / rejected → reopened → assigned or in_progress
+```
+
+Create records both `created` and `assigned` atomically, ending at revision 1. A task-linked finalize is valid only from `in_progress`; it cannot skip lifecycle states.
+
+## Audience and visibility
+
+A borrower-facing task is exactly one of:
+
+- targeted to one verified primary borrower;
+- targeted to one verified co-borrower;
+- shared with all approved borrower participants.
+
+There is no implicit null-target audience. The DB derives borrower/co-borrower type from `portal_access`, and specific document tasks must bind to a `loan_documents` row on the same loan and appropriate participant. Borrower responses exclude internal requirement, notes, evidence, metadata, creator and responsible-user identifiers.
+
+## Exact document binding
+
+Document tasks require `required_document_id` at creation. The team selects the existing request. The borrower task link:
+
+- renders only that document;
+- prepares `viewed` then `in_progress` through idempotent transitions;
+- requests a signed upload only for that document ID and task;
+- rejects unrelated documents before storage mutation;
+- finalizes only through the atomic document/task RPC.
+
+`linked_document_id` records the submitted result; it does not replace the immutable requirement binding.
+
+## Idempotency and concurrency
+
+Create, transition and finalize use:
+
+- mandatory idempotency keys;
+- canonical material request hashes;
+- explicit expected revision;
+- unique organization/key constraint;
+- duplicate-result lookup returning the original task/status/revision/document result;
+- row locking and stale-revision rejection;
+- deterministic notification-intent keys.
+
+The client persists pending operation key, material payload and expected revision in local storage. Ambiguous failures and refresh recovery reuse the original operation; definitive responses clear it.
+
+## Notification boundary
+
+Phase 1C task operations record only minimal `notification.queued` intent events inside the authoritative transaction. The task-linked path does not call email, SMS, push or webhook providers. The older task-less document-upload path retains its pre-existing email behavior and is explicitly separate from the task pilot.
+
+## Endpoints and UI
+
+Added/extended server paths:
+
+- `portal-task-list`
+- `portal-task-detail`
+- `portal-task-create`
+- `portal-task-transition`
+- task-aware `portal-doc-upload-url`
+- task-aware `portal-doc-complete`
+- participant-aware `portal-file-detail`
+- document-ID-aware `portal-checklist`
+
+Borrower UI shows real participant-scoped tasks, localized EN/ES/RU task state/action framing, safe reasons and only the required document. Team UI loads participants/documents, creates exact bound tasks and renders only lifecycle-valid actions.
 
 ## Feature flags
-`taskPilot`, `loanTeamTaskPilot` (both default FALSE). Enable per-environment via `VITE_FF_TASK_PILOT`
-/ `VITE_FF_LOAN_TEAM_TASK_PILOT`. Notification model + AI remain disabled.
 
-## Tests & PASS count
-**194 total / 194 pass / 0 fail** (post-EXT + Functional Completion Gate). EXT suites: `orgAccess`
-(EXT-1 loan-scoped org), `featureFlags` (EXT-10 fail-closed), `requestGuard` (EXT-11 hardening +
-prototype-pollution), `idempotency` (EXT-8 key/hash). `taskRepo` covers EXT-4 (stale/revision), EXT-5
-(atomic finalize + rollback + cross-loan), EXT-6 (reason set/clear), EXT-7 (participant visibility, two
-borrowers), EXT-8 (idempotency conflict), EXT-9 (one intent in-tx). FCG additions: required-reject-reason
-(RPC `reason_required`), no-duplicate-notification-intent on retry, cross-organization RPC-contract
-rejection (transition + finalize), and a structural no-send proof (`notificationIntent`). `taskLabels`
-expanded for EXT-6. Existing task-service / AI-boundary / role-visibility suites unchanged. No external
-vendor calls; no production secrets; injected adapters + pure helpers only — **fake-adapter tests are NOT
-live-database tests.**
+- Server: `FF_TASK_PILOT`, `FF_LOAN_TEAM_TASK_PILOT`
+- Client: corresponding `VITE_FF_*` presentation flags
 
-## Build result
-`npm run build` **success** — JS 575.79 kB (gzip 175.62 kB); Vite >500 kB chunk **warning only**.
+Server flags fail closed. Client flags never authorize backend behavior. All defaults remain off.
 
-## Security regression result
-No regression. All Phase 1A controls intact and green (admin allowlist, cron Bearer, rate limiting,
-MIME policy, signed URLs, no-store, security headers, safe logging, JWT, service-role isolation). New
-task endpoints are authenticated + org-scoped + loan-file-authorized; borrower reads field-scoped; RLS
-not weakened.
+## QA
 
-## Database-test limitations (honest)
-Repositories and atomicity/idempotency are proven with **injected fake adapters**, not a live database —
-mocked persistence is NOT represented as a live DB test. The live acceptance is `OURMTG-TASK-PILOT-ACCEPTANCE.md`
-(Supabase branch): apply migration, backfill, exercise the RPCs (atomicity, immutability, idempotency),
-and run the end-to-end + cross-org/role denials. Not executed here (no branch DB; no production access).
+GitHub Actions passed:
 
-## Mobile QA result
-Static verification (no Playwright dependency added — Chromium present but Playwright is not a resolvable
-module; adding it risks dep instability). New pilot components use only the existing responsive class
-system: **no fixed pixel widths, no `white-space:nowrap`, no x-overflow**; primary borrower action is a
-≥44px tap target; team review buttons wrap (`flex-wrap`); Russian labels wrap normally. Full device pass
-at 360×800 / 375×812 / 390×844 / 393×852 / 430×932 recommended in a browser before enabling the flags.
-With flags off, the current portal is unchanged.
+- `npm ci`
+- `npm run check`
+- `npm test` — **206/206**
+- `npm run build`
 
-## Remaining risks
-1. `npm audit`: 3 (1 moderate, 2 high) unchanged — nodemailer (runtime; CRLF mitigated, upgrade to ^9 pending) + vite/esbuild (dev-only).
-2. Live-DB behavior of the RPCs/RLS is acceptance-scripted but not executed here.
-3. ~~Single-org pilot assumption~~ **RESOLVED (EXT-1):** `loan_files.organization_id` now exists; the gateway resolves a file's org from the file and supports multi-org users. Requires the EXT-13 backfill to report zero unprovisioned files before flags are enabled.
-4. The Phase 1C **task**-notification model is intent-only: a `notification.queued` `loan_events` row is written in-transaction and **nothing is sent** (no email/SMS/push/webhook; proven structurally by `notificationIntent.test.mjs`). Note this is distinct from the **pre-existing** document-upload emails in `portal-doc-complete` (LO "a borrower uploaded" + borrower "we received your document"), which are unchanged Phase 1A/1B behavior and are NOT part of, or introduced by, the task-notification model.
-5. Full per-task upload wiring uses the existing checklist upload with a `?task` deep link; a dedicated per-task upload surface is a follow-up.
-6. Flags default off ⇒ pilot value is demonstrable only when enabled per-environment.
+The suite includes existing Phase 0/1A/1B/EXT coverage plus final lifecycle, exact-document, participant, persistent-operation, UI-action, no-send and SQL/JS parity tests. Tests use pure modules and injected fake adapters; they are not represented as live database evidence.
 
-## Unresolved decisions
-1. When/where to run the branch acceptance and flip the pilot flags.
-2. Add `loan_files.organization_id` now vs later (needed before multi-org).
-3. Notification transport + when to activate sending (reuse Resend / add Twilio).
-4. Whether team tasks should also be created from `loan_conditions` automatically in the pilot.
+Static mobile review found no new fixed-width/nowrap task controls and existing buttons retain mobile wrapping/tap behavior. A real-device run remains a production-readiness dependency.
 
-## Rollback instructions
-Additive code/docs/tests + one unapplied migration. **Full:** `git revert <phase-1c-commit>` or reset to
-`ef8bb68`; no DB/env to undo. **Selective:** delete the new `_lib/{orgAccess,taskRepo,notificationIntent}.mjs`
-+ `portal-task-*.mjs`, revert `portal-doc-complete.mjs`, delete `TeamTaskCard.jsx`/`taskLabels.js`, revert the
-`NeedsAttention`/`BorrowerDashboard`/`LoanFileDetail`/`Documents`/`api.js`/`flags.js` edits, delete new tests/docs.
-**Flags:** already default off. **Migration:** never applied; nothing to roll back (branch rollback block provided).
+## Remaining blockers
 
-## Proposed Phase 1D prompt (outline)
-```
-OURMTG PHASE 1D — PILOT DB ACCEPTANCE + HARDENING (still no production)
-Base: claude/ourmtg-phase1c-operational-pilot. No deploy/merge to production. Apply the 043 migration
-to a SUPABASE BRANCH only and run OURMTG-TASK-PILOT-ACCEPTANCE.md end to end; capture results.
-1. Add loan_files.organization_id (additive) + backfill; switch the gateway to resolve a file's org
-   from the file, not just caller membership; keep single-org behavior working.
-2. Integration tests against the branch (task create→submit→review→accept) incl. atomicity, immutability,
-   idempotency, cross-org/role denials — real DB, not mocks. Keep pure tests green.
-3. nodemailer → ^9 (review mailer), re-run npm audit; document residual.
-4. Wire the notification OUTBOX (still no send): promote notification-intent events into a
-   notification_deliveries-shaped table (draft→real on branch) with idempotency; sending stays deferred.
-5. Browser mobile pass at the 5 viewports with the pilot flags on (preview env); capture screenshots.
-6. Optional: auto-create a borrower task from a new loan_condition (behind the pilot flag).
-Deliver: branch-applied migration + acceptance evidence, files, tests (incl. live-DB), audit before/after,
-mobile evidence, remaining risks, rollback, Phase 1E outline. Stop after 1D.
-```
+1. Migration 043 independent review.
+2. Approved isolated Supabase branch and apply/rollback plan.
+3. Live SQL/RLS/RPC privilege, concurrency, idempotency and backfill acceptance.
+4. Preview environment with separate team/borrower/co-borrower identities and both pilot flags.
+5. Real mobile browser validation.
+6. Existing npm audit advisories remain unresolved.
+7. Independent PR review and explicit merge/deploy approval.
 
-Do not deploy · do not merge · do not apply migrations to production · do not change production env. Stopped after Phase 1C.
+## Rollback
+
+Code is cumulative on the feature branch and flags remain off. The final functional work can be reverted to `0d73dac`; backup branch `backup/phase1c-3c3f81b` preserves the prior intermediate tree. There is no database rollback to perform because migration 043 has not been applied.
+
+Do not merge, deploy, apply migration 043, enable flags, or begin Phase 1D without separate approval.
