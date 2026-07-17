@@ -51,11 +51,21 @@ export const getStatus = (loanFileId) =>
 export const getChecklist = (loanFileId) =>
   call(`portal-checklist?loanFileId=${encodeURIComponent(loanFileId)}`)
 
-export const getUploadUrl = (loanFileId, docKey) =>
-  call('portal-doc-upload-url', { method: 'POST', body: { loanFileId, docKey } })
+export const getUploadUrl = (loanFileId, docKey, options = {}) =>
+  call('portal-doc-upload-url', { method: 'POST', body: { loanFileId, docKey, ...options } })
 
-export const completeUpload = (documentId, taskId) =>
-  call('portal-doc-complete', { method: 'POST', body: { documentId, ...(taskId ? { taskId } : {}) } })
+export const completeUpload = (documentId, taskContext = null) =>
+  call('portal-doc-complete', {
+    method: 'POST',
+    body: {
+      documentId,
+      ...(taskContext ? {
+        taskId: taskContext.taskId,
+        expectedRevision: taskContext.expectedRevision,
+        idempotencyKey: taskContext.idempotencyKey,
+      } : {}),
+    },
+  })
 
 // ── Loan officer / owner ─────────────────────────────────────────────────────
 export const getReviewQueue = () => call('portal-review-queue')
@@ -140,15 +150,24 @@ export async function listMessages(loanFileId) {
 }
 
 // ── Upload a file to a server-minted signed URL, then finalize ───────────────
-export async function uploadDocument(loanFileId, docKey, file, taskId) {
-  const signed = await getUploadUrl(loanFileId, docKey)
+export async function uploadDocument(loanFileId, docKey, file, taskContext = null) {
+  const signed = await getUploadUrl(loanFileId, docKey, {
+    contentType: file.type || null,
+    filename: file.name || null,
+    ...(taskContext ? { taskId: taskContext.taskId, documentId: taskContext.requiredDocumentId } : {}),
+  })
+  if (taskContext?.requiredDocumentId && signed.documentId !== taskContext.requiredDocumentId) {
+    throw new ApiError('This upload does not match the requested task document.', 409)
+  }
   const { error } = await supabase()
     .storage.from(signed.bucket)
     .uploadToSignedUrl(signed.path, signed.token, file)
   if (error) throw new ApiError(error.message || 'Upload failed', 500)
-  // taskId links the finalize to a pilot task (transitions it to submitted). Only after the
-  // upload above SUCCEEDS — a failed upload throws before this and never moves the task.
-  return completeUpload(signed.documentId, taskId)
+  return completeUpload(signed.documentId, taskContext ? {
+    taskId: taskContext.taskId,
+    expectedRevision: taskContext.expectedRevision,
+    idempotencyKey: taskContext.idempotencyKey,
+  } : null)
 }
 
 // ── Lead intake (borrower application + realtor buyer submit) ─────────────────

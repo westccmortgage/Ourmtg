@@ -3,7 +3,26 @@
 // membership, realtor/escrow/title are denied, and users may belong to many orgs. Fake svc, no DB.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveTaskContext, memberOfOrg, actorTypeFor } from '../netlify/functions/_lib/orgAccess.mjs'
+import { resolveTaskContext, memberOfOrg, actorTypeFor, verifyBorrowerParticipant } from '../netlify/functions/_lib/orgAccess.mjs'
+
+// Fake svc backed by an in-memory portal_access table (supports .eq + .in + maybeSingle).
+function fakeAccessSvc(grants = []) {
+  return {
+    from() {
+      const eqs = []; let inClause = null
+      const b = {
+        select() { return b },
+        eq(k, v) { eqs.push([k, v]); return b },
+        in(k, vals) { inClause = [k, vals]; return b },
+        maybeSingle() {
+          const row = grants.find((g) => eqs.every(([k, v]) => g[k] === v) && (!inClause || inClause[1].includes(g[inClause[0]])))
+          return Promise.resolve({ data: row ? { visibility: row.visibility } : null, error: null })
+        },
+      }
+      return b
+    },
+  }
+}
 
 // Fake Supabase svc backed by an in-memory organization_members table.
 function fakeSvc(members = [], { tableMissing = false } = {}) {
@@ -107,6 +126,28 @@ test('memberOfOrg reports unprovisioned when the table is missing (42P01)', asyn
   const m = await memberOfOrg(svc, 'u', 'org-wcc')
   assert.equal(m.provisioned, false)
   assert.equal(m.ok, false)
+})
+
+// FCG #2: a targeted participant must be a VERIFIED borrower/co-borrower on THIS loan file.
+test('FCG #2: verifyBorrowerParticipant accepts a real borrower/co-borrower on the file', async () => {
+  const svc = fakeAccessSvc([
+    { loan_file_id: 'f1', portal_user: 'b1', visibility: 'borrower' },
+    { loan_file_id: 'f1', portal_user: 'c1', visibility: 'coborrower' },
+    { loan_file_id: 'f1', portal_user: 'r1', visibility: 'realtor' },
+  ])
+  assert.equal((await verifyBorrowerParticipant(svc, 'f1', 'b1')).ok, true)
+  assert.equal((await verifyBorrowerParticipant(svc, 'f1', 'c1')).ok, true)
+})
+
+test('FCG #2: verifyBorrowerParticipant rejects a non-borrower, a wrong file, and unknown users', async () => {
+  const svc = fakeAccessSvc([
+    { loan_file_id: 'f1', portal_user: 'r1', visibility: 'realtor' },
+    { loan_file_id: 'f2', portal_user: 'b9', visibility: 'borrower' },
+  ])
+  assert.equal((await verifyBorrowerParticipant(svc, 'f1', 'r1')).ok, false) // realtor is not a borrower
+  assert.equal((await verifyBorrowerParticipant(svc, 'f1', 'b9')).ok, false) // borrower, but on a DIFFERENT file
+  assert.equal((await verifyBorrowerParticipant(svc, 'f1', 'ghost')).ok, false) // no grant at all
+  assert.equal((await verifyBorrowerParticipant(svc, '', 'b1')).ok, false)     // missing args
 })
 
 test('actorTypeFor maps roles to task-service actor types', () => {

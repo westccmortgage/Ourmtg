@@ -1,84 +1,201 @@
-# OURMTG — Task API (Phase 1C pilot, external-review hardened)
+# OURMTG — Task API (Phase 1C)
 
-Authenticated Netlify Functions (Supabase JWT Bearer). Org is resolved from the **loan file**
-(`loan_files.organization_id`, EXT-1); internal callers must be **active members** of that org,
-borrowers/co-borrowers ride `portal_access` (no membership). No raw table CRUD is exposed — the base
-operational tables are not selectable by `anon`/`authenticated` (EXT-2); persistence goes through
-`service_role`-only SECURITY DEFINER RPCs (EXT-3). All responses `Cache-Control: no-store`.
+All task APIs are authenticated Netlify Functions. Organization comes from `loan_files.organization_id`; internal actors also need active membership in that organization, while borrower/co-borrower access comes from the file-specific `portal_access` grant.
 
-Every endpoint is gated by a **fail-closed server flag** (EXT-10): `FF_TASK_PILOT` for borrower
-list/detail/transition + task-linked upload; `FF_LOAN_TEAM_TASK_PILOT` for team create/review. When
-the relevant flag is unset the endpoint returns `404`. `VITE_FF_*` is presentation-only and authorizes
-nothing.
+Operational tables are not directly selectable by browser roles. Authoritative mutations use service-role-only RPCs. Sensitive responses are `Cache-Control: no-store`.
 
-Every POST is hardened (EXT-11): JSON content-type required (`415`), size-capped (`413`), empty/invalid
-JSON rejected (`400`), arrays/non-objects rejected, and any payload containing `__proto__` /
-`constructor` / `prototype` keys rejected (`400`). UUIDs, enums, timestamps and string bounds are
-validated; client errors are generic and logs are PII-safe.
+## Feature gates
 
-## `GET portal-task-list?loanFileId=<id>`
-Lists tasks for a loan file. Internal (owner/team, member of the file's org) → full rows. Borrower/
-co-borrower → their **participant-scoped** borrower-facing tasks only (EXT-7: shared, targeted to them,
-or untargeted — never a task targeted to another borrower), **field-scoped** (no `internal_requirement`,
-notes, evidence, `created_by`, `responsible_user_id`; `borrower_visible_status_reason` **is** included).
-Realtor/escrow/title → `403`. Unprovisioned file (no org) → `503`. → `{ ok, view:'team'|'borrower', tasks[] }`.
+- Borrower task reads/actions and task-linked upload: `FF_TASK_PILOT`
+- Team task create/review: `FF_LOAN_TEAM_TASK_PILOT`
 
-## `GET portal-task-detail?taskId=<id>`
-One task. Internal → task + `history[]`. Borrower → scrubbed task (EXT-6 reason included), no history,
-and only if the borrower is a participant of that task (EXT-7). Cross-org → `403`.
+The server flags fail closed. `VITE_FF_*` controls presentation only.
 
-## `POST portal-task-create`  (internal only; `FF_LOAN_TEAM_TASK_PILOT`)
-Body: `{ loanFileId, title, idempotencyKey, borrowerExplanation?, internalRequirement?, dueAt?,
-isBlocking?, requiredDocumentType?, taskType?, priority?, sharedWithBorrowers?, responsibleUserId? }`.
+## Request hardening
 
-- **`idempotencyKey` is MANDATORY** (EXT-8): `^[A-Za-z0-9_.:-]{8,200}$`; there is no random server
-  fallback. The server also computes a canonical **request hash** of the material payload. Same key +
-  same payload → the original `taskId` (`deduped:true`); same key + different payload →
-  `idempotency_conflict` (`409`).
-- **Participant selection is required** (EXT-7): `sharedWithBorrowers:true` **or** a valid
-  `responsibleUserId` (UUID). Neither → `400`.
-- `dueAt` validated (`400` on a bad date). Creates atomically (task + history `created` + event
-  `task.created`) and writes the borrower notification **intent in the same transaction**, keyed
-  `intent:<idempotencyKey>` (EXT-9 — no send here). → `{ ok, taskId, deduped? }`.
+Phase 1C POST handlers require JSON, size-cap the raw body, reject malformed/non-object JSON and dangerous prototype keys, validate UUIDs/enums/timestamps/lengths, and return safe generic transport/database errors.
 
-## `POST portal-task-transition`  (`FF_TASK_PILOT` for borrowers · `FF_LOAN_TEAM_TASK_PILOT` for team)
-Body: `{ taskId, action, idempotencyKey, expectedRevision?, reason?, borrowerVisibleReason?, evidence? }`.
-`action ∈ assign | view | begin | submit | precheck | sendToTeamReview | accept | reject |
-requestMoreInfo | complete | reopen | cancel`.
+## `GET portal-task-list?loanFileId=<uuid>`
 
-- Validation is the canonical pure task service (fast-fail); the **RPC is authoritative**: it locks the
-  row `FOR UPDATE`, checks `expectedRevision` against the stored `revision` (EXT-4 →
-  `stale_task` on mismatch), re-validates the transition graph, **derives** the to-status and event type
-  itself (the caller never supplies a status or event), bumps `revision`, and writes task + history +
-  event atomically.
-- `reject` / `requestMoreInfo` require a **borrower-visible reason** (`borrowerVisibleReason`, ≥3 chars,
-  EXT-6). The reason is stored on the task, returned to the borrower, and **cleared** when the borrower
-  resubmits or the item is accepted/completed. `reason` is a separate internal (private) note.
-- `evidence` is accepted **only from internal (team) actors** and only under a size cap.
-- **`idempotencyKey` is MANDATORY** and bound to `{taskId, action, expectedRevision, actor, reason,
-  borrowerVisibleReason, evidence}` (EXT-8). `linkedDocumentId` is **not** accepted here — document
-  linking happens only in `portal-doc-complete`.
-- A reject / more-info also writes the borrower notification **intent in the same transaction** (EXT-9).
-→ `{ ok, from, to, revision, deduped? }`.
+Internal caller:
 
-Error → HTTP: `unknown_action`→400 · `invalid_transition`/`review_required`/`stale_task`/
-`idempotency_conflict`→409 · `forbidden_action`/`forbidden_role`/`ai_forbidden`→403 ·
-`persist_failed`→500 · not found→404.
+- full task rows for one authorized file and organization.
 
-## Document linking — `POST portal-doc-complete` (extended; `FF_TASK_PILOT`)
-Body adds optional `taskId`. Storage existence is verified **fail-closed** first (a storage list error
-returns `502` — it is never treated as permission to proceed). When `taskId` is a valid UUID, the flag
-is on, and the caller is a participant borrower of that task, one **atomic RPC**
-(`ourmtg_document_finalize_submit`, EXT-5) validates document/task/loan/org + borrower participant +
-expected revision, marks the document `uploaded`, links it, transitions the task to `submitted`, and
-appends history + event — **all-or-nothing**. Any failure rolls back both the document and the task; the
-endpoint never reports `ok` after a partial failure. Without a `taskId` (or flag off) the legacy
-document-only flip runs. → `{ ok, documentId, status, taskTransition? }`.
+Borrower/co-borrower:
 
-## Borrower may / may not
-May: list **participant-visible** tasks, view a permitted task, `view`, `begin`, `submit`, upload linked
-documents. May not: create/assign tasks, `accept`/`reject`, complete review-required tasks, see
-`internal_requirement`/internal evidence/notes, or act on a task targeted to another borrower.
-Realtor/escrow/title: no financial/document tasks. Team: create, assign, review, accept, reject,
-request-more-info, complete, reopen, cancel (own files, as an org member). Admin authority (site
-settings) is separate from loan/task access.
+- only shared tasks or tasks targeted to the authenticated participant;
+- safe borrower fields only;
+- no internal requirement, internal reason/evidence, metadata, creator or responsible-user identifier.
+
+Realtor/escrow/title and cross-organization callers are denied.
+
+## `GET portal-task-detail?taskId=<uuid>`
+
+Internal caller receives task plus history. Borrower receives a scrubbed task only when they are an approved participant and the task is shared or specifically targeted to them.
+
+Borrower-safe task data includes:
+
+- title and explanation;
+- status and revision;
+- due date/priority/blocking;
+- safe borrower-visible status reason;
+- exact `required_document_id`;
+- submitted `linked_document_id` when present.
+
+## `POST portal-task-create`
+
+Internal-only; requires `FF_LOAN_TEAM_TASK_PILOT`.
+
+Material body:
+
+```json
+{
+  "loanFileId": "uuid",
+  "taskType": "document_request",
+  "title": "Upload your June business bank statement",
+  "borrowerExplanation": "Please include every page.",
+  "internalRequirement": "UW: two consecutive months, all pages",
+  "responsibleUserId": "uuid or null",
+  "sharedWithBorrowers": false,
+  "requiredDocumentId": "uuid",
+  "requiredDocumentType": "business_bank_statement",
+  "dueAt": "ISO timestamp or null",
+  "priority": "normal",
+  "isBlocking": true,
+  "idempotencyKey": "stable client operation key"
+}
+```
+
+Rules:
+
+- specific task: verified participant ID, `sharedWithBorrowers=false`;
+- shared task: `responsibleUserId=null`, `sharedWithBorrowers=true`;
+- participant type is derived from `portal_access`;
+- document tasks require the exact existing `loan_documents.id` on the same loan;
+- specific participant’s document `who` must match their borrower/co-borrower visibility;
+- idempotency key is mandatory and bound to a canonical material request hash.
+
+The RPC atomically records:
+
+- task ending `assigned`, revision 1;
+- history: `null→created`, `created→assigned`;
+- events: `task.created`, `task.assigned`;
+- one minimal `notification.queued` intent.
+
+Response:
+
+```json
+{ "ok": true, "taskId": "uuid", "status": "assigned", "revision": 1, "deduped": false }
+```
+
+A valid retry returns the original task/status/revision. Same key with changed material returns `409 idempotency_conflict`.
+
+## `POST portal-task-transition`
+
+Borrower actions require `FF_TASK_PILOT`; internal actions require `FF_LOAN_TEAM_TASK_PILOT`.
+
+```json
+{
+  "taskId": "uuid",
+  "action": "view|begin|submit|precheck|sendToTeamReview|accept|reject|requestMoreInfo|complete|reopen|cancel|assign",
+  "expectedRevision": 3,
+  "idempotencyKey": "stable client operation key",
+  "borrowerVisibleReason": "required for reject, requestMoreInfo, and reopen",
+  "reason": "optional internal reason",
+  "evidence": { "teamOnly": "bounded object" }
+}
+```
+
+The endpoint verifies access and audience, then the repository invokes the atomic RPC. The RPC:
+
+1. checks key/hash and returns original material result on a duplicate;
+2. locks the task;
+3. verifies file organization and actor relationship;
+4. compares expected revision;
+5. derives and validates the canonical next state/event;
+6. requires a borrower-visible reason where applicable;
+7. updates task, history, event and optional intent in one transaction.
+
+Response:
+
+```json
+{ "ok": true, "taskId": "uuid", "from": "submitted", "to": "team_review", "revision": 5, "deduped": false }
+```
+
+Domain errors remain distinguishable from `persist_failed`. A stale distinct operation writes nothing; a same-key retry returns the original result.
+
+## Task-linked upload preparation: `POST portal-doc-upload-url`
+
+Legacy body remains `{ loanFileId, docKey }`.
+
+Task-linked body adds:
+
+```json
+{
+  "loanFileId": "uuid",
+  "docKey": "business_bank_statement",
+  "taskId": "uuid",
+  "documentId": "the task required_document_id",
+  "filename": "statement.pdf",
+  "contentType": "application/pdf"
+}
+```
+
+When `taskId` is supplied:
+
+- pilot flag must be on;
+- task must exist, be participant-visible and `in_progress`;
+- `documentId` and `docKey` must identify the exact bound document request;
+- another document cannot receive a signed task upload URL;
+- invalid/missing task context never falls back to legacy behavior.
+
+## Task-linked finalize: `POST portal-doc-complete`
+
+Legacy body remains `{ documentId }` and preserves the pre-existing task-less email behavior.
+
+Task-linked body:
+
+```json
+{
+  "documentId": "uuid",
+  "taskId": "uuid",
+  "expectedRevision": 3,
+  "idempotencyKey": "stable client operation key"
+}
+```
+
+The gateway validates JSON/UUIDs/flags/access, verifies the private storage object fail-closed, and invokes the atomic finalize RPC. The RPC requires:
+
+- task status `in_progress`;
+- exact `required_document_id`;
+- same loan and organization;
+- actor’s matching borrower/co-borrower grant;
+- shared or exact participant audience;
+- expected revision and idempotency hash.
+
+One successful transaction writes document uploaded, task submitted, history, event and one minimal loan-team intent. The task-linked path calls no delivery provider. A duplicate returns the original task/document/revision result.
+
+## Client retry contract
+
+The browser persists pending create, transition and finalize operations before sending:
+
+- idempotency key;
+- material payload;
+- expected revision;
+- task/document identity.
+
+Double-click, ambiguous failure and refresh recovery reuse the original operation. Definitive success/client rejection clears it. A lost finalize response retries finalize before attempting a second upload.
+
+## Lifecycle
+
+```text
+create RPC: created → assigned
+borrower: assigned → viewed → in_progress
+linked finalize: in_progress → submitted
+team: submitted → team_review → accepted|rejected|more_information_needed
+accepted → completed
+accepted|completed|rejected → reopened
+reopened → assigned|in_progress
+```
+
+The SQL graph is tested for parity with the server/domain graph. Finalize cannot bypass lifecycle states.
