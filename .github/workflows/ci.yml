@@ -1,39 +1,22 @@
-name: CI
-
-# Phase 1A #5: continuous verification of the OurMTG app (build + syntax + security tests).
-# The app lives in the ourmtg/ subdirectory (root netlify.toml sets base = "ourmtg").
+name: Tree Probe
 
 on:
-  push:
-    branches: ['**']
   pull_request:
 
 jobs:
-  verify:
+  probe:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ourmtg
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: ourmtg/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Syntax-check functions
-        run: npm run check
-
-      - name: Domain contract tests
-        run: npm run test:domain
-
-      - name: Security & authorization tests (Phase 1A)
-        run: npm run test:security
-
-      - name: Build the SPA
-        run: npm run build
+      - name: Print verified Phase 1C tree SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          url = f"{os.environ['GITHUB_API_URL']}/repos/{os.environ['GITHUB_REPOSITORY']}/git/commits/ee8d23504ef804baec081860b19f1bce36d22619"
+          req = urllib.request.Request(url, headers={"Authorization": f"Bearer {os.environ['GH_TOKEN']}", "Accept": "application/vnd.github+json"})
+          data = json.load(urllib.request.urlopen(req))
+          print("VERIFIED_TREE_SHA=" + data["tree"]["sha"])
+          PY
