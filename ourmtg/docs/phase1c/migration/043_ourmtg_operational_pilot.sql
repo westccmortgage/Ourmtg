@@ -49,17 +49,28 @@ alter table public.loan_files
   add column if not exists organization_id uuid references public.organizations(id) on delete restrict;
 create index if not exists loan_files_org on public.loan_files (organization_id);
 
--- Deterministic single-organization pilot backfill. This code is intentionally part of the
--- reviewable migration so an isolated-branch apply has a reproducible result, not an operator-
--- invented sequence. A conflicting WCC display name under another slug stops the migration.
+-- ============================================================================================
+-- ORGANIZATION BACKFILL — FAIL-CLOSED, SINGLE-ORGANIZATION PILOT ONLY (M2)
+-- ============================================================================================
+-- This block modifies loan_files.organization_id and then sets it NOT NULL, so it is gated by a
+-- preflight that reports a full inventory and REFUSES to proceed on any ambiguity. It never infers
+-- organization from an email domain and never silently claims a NULL row merely because it is NULL:
+-- it proceeds only after confirming the dataset contains no loan file belonging to another
+-- organization and no ambiguous ownership, i.e. an unambiguous single-organization WCC pilot.
+-- A multi-organization dataset MUST instead supply an explicit loan-file → organization mapping
+-- (see the MULTI-ORGANIZATION NOTE below); automatic assignment is refused for it.
+-- ============================================================================================
+
+-- (1) Deterministic target organization by stable slug. A legal/display identity collision under a
+--     DIFFERENT slug stops the migration (never an arbitrary pick).
 do $$
 begin
   if exists (
     select 1 from public.organizations
-    where display_name = 'West Coast Capital Mortgage'
+    where (display_name = 'West Coast Capital Mortgage' or legal_name = 'West Coast Capital Mortgage Inc.')
       and slug <> 'west-coast-capital-mortgage'
   ) then
-    raise exception 'organization_preflight_conflict';
+    raise exception 'organization_preflight_conflict: WCC identity exists under a different slug';
   end if;
 end $$;
 
@@ -71,6 +82,54 @@ on conflict (slug) do update
       status = 'active',
       archived_at = null;
 
+-- (2) PREFLIGHT INVENTORY + FAIL-CLOSED GATE. Reports the dataset and refuses the automatic
+--     single-org backfill unless it is provably unambiguous. Every count is emitted as a NOTICE so
+--     an operator reviewing the isolated-branch apply log sees exactly what will be backfilled.
+do $$
+declare
+  v_target uuid;
+  v_total bigint; v_owners bigint; v_org_values bigint; v_other_org bigint;
+  v_owner_null bigint; v_targets bigint; v_identity_conflict bigint; v_owner_missing bigint;
+begin
+  select id into strict v_target from public.organizations where slug = 'west-coast-capital-mortgage';
+
+  select count(*)                        into v_total  from public.loan_files;
+  select count(distinct owner_user_id)   into v_owners from public.loan_files;
+  select count(distinct organization_id) into v_org_values from public.loan_files where organization_id is not null;
+  select count(*) into v_other_org  from public.loan_files where organization_id is not null and organization_id <> v_target;
+  select count(*) into v_owner_null from public.loan_files where owner_user_id is null;
+  select count(*) into v_targets    from public.organizations where slug = 'west-coast-capital-mortgage';
+  select count(*) into v_identity_conflict from public.organizations
+    where (display_name = 'West Coast Capital Mortgage' or legal_name = 'West Coast Capital Mortgage Inc.')
+      and slug <> 'west-coast-capital-mortgage';
+  select count(*) into v_owner_missing from public.loan_files lf
+    where lf.owner_user_id is not null
+      and not exists (select 1 from public.organization_members m
+                      where m.organization_id = v_target and m.user_id = lf.owner_user_id and m.status = 'active');
+
+  raise notice 'BACKFILL PREFLIGHT total_loan_files=%', v_total;
+  raise notice 'BACKFILL PREFLIGHT distinct_owner_user_id=%', v_owners;
+  raise notice 'BACKFILL PREFLIGHT distinct_existing_organization_id=%', v_org_values;
+  raise notice 'BACKFILL PREFLIGHT files_assigned_to_another_org=%', v_other_org;
+  raise notice 'BACKFILL PREFLIGHT files_with_null_owner_ambiguous=%', v_owner_null;
+  raise notice 'BACKFILL PREFLIGHT target_org_count_by_slug=%', v_targets;
+  raise notice 'BACKFILL PREFLIGHT conflicting_identity_orgs=%', v_identity_conflict;
+  raise notice 'BACKFILL PREFLIGHT owners_without_target_membership_pre=%', v_owner_missing;
+
+  -- Fail closed on every ambiguous condition (M2). None of these may be silently assigned.
+  if v_targets <> 1 then
+    raise exception 'backfill_refused: expected exactly one WCC target organization, found %', v_targets; end if;
+  if v_identity_conflict > 0 then
+    raise exception 'backfill_refused: a conflicting WCC identity exists under another slug'; end if;
+  if v_other_org > 0 then
+    raise exception 'backfill_refused: % loan file(s) already belong to another organization — supply an explicit multi-org mapping', v_other_org; end if;
+  if v_owner_null > 0 then
+    raise exception 'backfill_refused: % loan file(s) have no owner_user_id — ownership is ambiguous and membership cannot be safely created', v_owner_null; end if;
+end $$;
+
+-- (3) OPERATOR-APPROVED SINGLE-ORG BACKFILL. The preflight has confirmed no loan file belongs to
+--     another organization and every file has an owner, so assigning the remaining unassigned files
+--     to the single WCC pilot organization is unambiguous — NOT a blind "NULL => WCC".
 update public.loan_files lf
 set organization_id = o.id
 from public.organizations o
@@ -80,7 +139,7 @@ where o.slug = 'west-coast-capital-mortgage'
 insert into public.organization_members (organization_id, user_id, role, status)
 select lf.organization_id, lf.owner_user_id, 'loan_officer', 'active'
 from public.loan_files lf
-where lf.organization_id is not null
+where lf.organization_id is not null and lf.owner_user_id is not null
 on conflict (organization_id, user_id) do update
   set status = 'active',
       role = case
@@ -88,27 +147,29 @@ on conflict (organization_id, user_id) do update
         else 'loan_officer'
       end;
 
+-- (4) POST-BACKFILL VALIDATION — must report ZERO unmatched rows before SET NOT NULL.
 do $$
-declare v_target uuid;
+declare v_target uuid; v_unassigned bigint; v_owner_missing bigint;
 begin
   select id into strict v_target from public.organizations where slug = 'west-coast-capital-mortgage';
-  if exists (select 1 from public.loan_files where organization_id is distinct from v_target) then
-    raise exception 'loan_file_organization_backfill_incomplete';
-  end if;
-  if exists (
-    select 1 from public.loan_files lf
-    where not exists (
-      select 1 from public.organization_members m
-      where m.organization_id = lf.organization_id
-        and m.user_id = lf.owner_user_id
-        and m.status = 'active'
-    )
-  ) then
-    raise exception 'owner_membership_backfill_incomplete';
-  end if;
+  select count(*) into v_unassigned from public.loan_files where organization_id is distinct from v_target;
+  select count(*) into v_owner_missing from public.loan_files lf
+    where not exists (select 1 from public.organization_members m
+                      where m.organization_id = v_target and m.user_id = lf.owner_user_id and m.status = 'active');
+  raise notice 'BACKFILL VALIDATION files_not_in_target_org=% owners_without_membership=%', v_unassigned, v_owner_missing;
+  if v_unassigned > 0 then
+    raise exception 'backfill_incomplete: % loan file(s) not assigned to the target organization', v_unassigned; end if;
+  if v_owner_missing > 0 then
+    raise exception 'backfill_incomplete: % owner(s) without active target membership', v_owner_missing; end if;
 end $$;
 
 alter table public.loan_files alter column organization_id set not null;
+
+-- MULTI-ORGANIZATION NOTE (not executed). The block above intentionally REFUSES any dataset in which
+-- a loan file already belongs to another organization or an owner is ambiguous. A future multi-org
+-- migration must provide an explicit, reviewed loan_file_id → organization_id mapping (e.g. a staging
+-- table) and assign strictly from that mapping — it must never treat a NULL organization_id as
+-- implicitly WCC, and must never infer organization from an email domain.
 
 create table if not exists public.loan_events (
   id               uuid primary key default gen_random_uuid(),

@@ -4,7 +4,7 @@ This is the code-completion report for branch `claude/ourmtg-phase1c-operational
 
 ## Guardrails
 
-- Migration 043: **UNAPPLIED**. It remains review source outside `supabase/migrations/`.
+- Migration 043: **UNAPPLIED**. It remains review source outside `supabase/migrations/`. Its reviewed dependency-ordered rollback companion `043_ourmtg_operational_pilot.rollback.sql` is review source only, hard-guarded against execution, and has **not** been run.
 - PR #1: **OPEN, UNMERGED**.
 - Production deploy: **NOT PERFORMED**.
 - Phase 1D: **NOT STARTED**.
@@ -18,11 +18,11 @@ GitHub Actions completed successfully on the final functional tree:
 
 - `npm ci` — PASS
 - `npm run check` — PASS
-- `npm test` — **206 / 206 PASS**
+- `npm test` — **205 / 205 PASS**
 - `npm run build` — PASS
 - Existing `npm audit` result remains 3 pre-existing advisories (1 moderate, 2 high); no advisory was hidden or waived.
 
-The 206 count is the prior 194-test suite plus the net 12 additional functional-completion tests. Existing repository scenarios were retained in `taskRepoRegression.test.mjs` rather than deleted to make the rewritten contract suite green.
+The 205 count is the prior 194-test suite plus the net 11 additional functional-completion tests. Existing repository scenarios were retained in `taskRepoRegression.test.mjs` rather than deleted to make the rewritten contract suite green.
 
 ## Functional flow implemented
 
@@ -49,7 +49,7 @@ There is no direct `created|assigned|viewed|rejected|reopened → submitted` fin
 5. **End-to-end idempotency** — PASS at code/adapter level. Pending create/transition/finalize operations persist key, material payload, and expected revision across double-click, ambiguous failure, and refresh. RPC dedupe returns the original material result.
 6. **Fail-closed linked finalize** — PASS. A supplied task ID never falls back to legacy completion. Invalid ID, disabled flag, missing task, unauthorized participant, wrong document, stale revision, or relationship mismatch fails without partial state.
 7. **Database authority** — PASS at source-contract level. RPCs verify file organization, actor role/membership, participant, exact document, revision, reason, and canonical lifecycle before one atomic commit.
-8. **Organization backfill** — PASS at migration-source level. The migration performs deterministic slug preflight/upsert, file and owner-membership backfill, organization-scoped validation, and sets `loan_files.organization_id` non-null only after validation.
+8. **Organization backfill** — PASS at migration-source level. The migration is **fail-closed** (M2): an identity-collision preflight, a preflight inventory that emits `RAISE NOTICE` counts and **refuses** (`backfill_refused`) on more than one target org, any file already in another organization, or any null-owner file; only then the operator-approved single-org assignment + owner-membership backfill; then zero-unmatched validation before `SET NOT NULL`. It never treats `NULL ⇒ WCC` blindly and never infers org from email domain; multi-org datasets are refused and require an explicit mapping.
 
 ## FCG-1 through FCG-14
 
@@ -65,7 +65,7 @@ There is no direct `created|assigned|viewed|rejected|reopened → submitted` fin
 | FCG-8 Team pilot UI | PASS | Verified participant/document selection, persistent operations, distinct states/errors, valid actions only. |
 | FCG-9 Trilingual labels | PASS | EN/ES/RU coverage tests for borrower task states/actions/reason framing. |
 | FCG-10 Cash-to-close boundary | PASS | No authoritative cash-to-close engine introduced; existing planning adapter remains decoupled and flag-gated. |
-| FCG-11 Automated evidence | PASS (code) / BLOCKED (live DB/device) | 206 tests, check and build pass. SQL concurrency/RLS/RPC privilege and real-device checks require approved environments. |
+| FCG-11 Automated evidence | PASS (code) / BLOCKED (live DB/device) | 205 tests, check and build pass. SQL concurrency/RLS/RPC privilege and real-device checks require approved environments. |
 | FCG-12 Functional scenario proof | PASS (fake adapter) / BLOCKED (live DB) | Full create→view→begin→finalize→review flow, failure rollback, idempotency and no-send contracts tested without shared DB mutation. |
 | FCG-13 Documentation accuracy | PASS | Architecture, migration, API, acceptance and reports distinguish implemented, unapplied, tested and blocked work. |
 | FCG-14 Commit discipline | PASS after delivery squash | Final branch is reduced to one functional-completion commit above `0d73dac`; PR remains open/unmerged. |

@@ -49,7 +49,7 @@ The migration:
 - revokes browser access to operational base tables;
 - grants RPC execution only to `service_role`;
 - uses `ON DELETE RESTRICT` for operational audit retention;
-- performs deterministic WCC organization preflight/upsert/backfill and stops on mismatches;
+- performs a **fail-closed** deterministic WCC organization preflight/upsert/backfill: it reports an inventory and refuses (`backfill_refused`) on more than one target org, any file already in another organization, or any null-owner file, and never treats `NULL ⇒ WCC` blindly (M2);
 - requires live isolated-branch acceptance before any promotion.
 
 ## Lifecycle
@@ -133,7 +133,7 @@ GitHub Actions passed:
 
 - `npm ci`
 - `npm run check`
-- `npm test` — **206/206**
+- `npm test` — **205/205**
 - `npm run build`
 
 The suite includes existing Phase 0/1A/1B/EXT coverage plus final lifecycle, exact-document, participant, persistent-operation, UI-action, no-send and SQL/JS parity tests. Tests use pure modules and injected fake adapters; they are not represented as live database evidence.
@@ -152,6 +152,6 @@ Static mobile review found no new fixed-width/nowrap task controls and existing 
 
 ## Rollback
 
-Code is cumulative on the feature branch and flags remain off. The final functional work can be reverted to `0d73dac`; backup branch `backup/phase1c-3c3f81b` preserves the prior intermediate tree. There is no database rollback to perform because migration 043 has not been applied.
+Code is cumulative on the feature branch and flags remain off. The final functional work can be reverted to `0d73dac`. There is no database rollback to perform because migration 043 has not been applied. The reviewed, dependency-ordered database rollback companion is **`docs/phase1c/migration/043_ourmtg_operational_pilot.rollback.sql`** (review source only; hard-guarded against execution; destructive statements commented). It has **not** been executed. It covers a safety guard, a pilot-flags-disabled checklist, pre-rollback inventory, export/snapshot of the audit and operational tables, an explicit decision gate before deleting immutable audit evidence, reverse dependency-order drops, `ON DELETE RESTRICT` handling, post-rollback validation, and the separation between a disposable branch rollback and a production retention/decommission that must not silently delete audit data.
 
 Do not merge, deploy, apply migration 043, enable flags, or begin Phase 1D without separate approval.

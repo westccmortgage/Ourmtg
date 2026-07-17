@@ -19,14 +19,24 @@ Do not use production credentials or data.
 
 ## 1. Migration preflight and apply
 
-Review the SQL, then apply it to the isolated branch only. The migration itself performs:
+Review the SQL, then apply it to the isolated branch only. The migration itself performs (M2 —
+**fail-closed** single-organization backfill):
 
-- unique-slug conflict preflight;
-- deterministic WCC organization upsert;
-- file organization backfill;
+- legal/display identity-collision preflight (conflict under another slug stops the migration);
+- deterministic WCC organization upsert by unique slug;
+- **preflight inventory + gate** — emits `RAISE NOTICE` counts (total files; distinct owners; distinct
+  existing org ids; files in another org; null-owner files; target org count; identity conflicts;
+  owners without target membership) and **REFUSES** (`backfill_refused`) on more than one target org,
+  an identity conflict, **any file already in another organization**, or **any null-owner file**;
+- operator-approved single-org assignment (only after the gate passes);
 - owner membership backfill;
-- organization-scoped validation;
+- post-backfill validation reporting zero unmatched rows;
 - `loan_files.organization_id NOT NULL` only after validation.
+
+**Fail-closed acceptance (M2):** on a deliberately seeded branch where one loan file is pre-assigned to a
+different organization, or a loan file has a null owner, applying the migration must **raise
+`backfill_refused`** and leave `loan_files` unchanged (no `NOT NULL` conversion). Capture the `NOTICE`
+inventory from the apply log as evidence.
 
 Verify:
 
@@ -240,7 +250,15 @@ Capture screenshots and request/response evidence without exposing borrower PII.
 
 Verify update/delete of event/history rows raises. Verify hard-delete of task/file/organization with operational history is restricted. Test soft archive.
 
-Before any rollback, export audit rows. Follow a reviewed dependency-order rollback; do not erase immutable history simply to make rollback convenient.
+Rollback uses the reviewed companion **`043_ourmtg_operational_pilot.rollback.sql`** (review source only;
+it hard-guards against accidental execution and keeps destructive statements commented). Before any
+rollback on the disposable branch: confirm pilot flags are disabled, capture the pre-rollback inventory,
+export `loan_events` / `loan_task_history` / `loan_tasks` / `organization_members` / `organizations` /
+affected `loan_files`, pass the explicit decision gate, then run the reverse dependency-order drops
+(RPCs → helpers → history → tasks → events → memberships → `loan_files.organization_id` column →
+organizations → immutable trigger fn) and the post-rollback validation. Do not erase immutable history to
+make rollback convenient; production decommission must retain audit data (not covered by the branch
+rollback).
 
 ## Exit rule
 

@@ -132,7 +132,7 @@ Missing or malformed server flags mean disabled. All defaults remain off.
 ## Verification status
 
 - `npm run check` — PASS
-- `npm test` — **206/206 PASS**
+- `npm test` — **205/205 PASS**
 - `npm run build` — PASS
 - SQL/JS lifecycle parity — automated PASS
 - Migration 043 live application — NOT RUN

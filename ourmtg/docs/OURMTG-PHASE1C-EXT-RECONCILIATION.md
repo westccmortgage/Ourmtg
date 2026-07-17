@@ -9,7 +9,7 @@ This document maps the externally supplied findings to the final Phase 1C implem
 - Migration 043 applied: **NO**
 - Live DB tests: **NOT RUN**
 - Phase 1D: **NOT STARTED**
-- QA: check PASS · **206/206 tests PASS** · production build PASS
+- QA: check PASS · **205/205 tests PASS** · production build PASS
 
 ## EXT findings
 

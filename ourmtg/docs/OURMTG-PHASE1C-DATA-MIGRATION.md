@@ -35,19 +35,27 @@ The migration references existing:
 
 It does not delete or rewrite existing portal, invite, consent, condition, document, message, CRM or storage records.
 
-## Deterministic organization backfill
+## Fail-closed single-organization backfill (M2)
 
-The migration performs the following sequence, and stops on conflict:
+The backfill is **fail-closed** and never silently claims a `NULL` row. It never infers organization
+from an email domain. The sequence is:
 
-1. preflight: reject a West Coast Capital Mortgage display-name collision under another slug;
-2. upsert `west-coast-capital-mortgage` using the unique slug;
-3. assign currently unassigned loan files to that organization;
-4. create/reactivate owner memberships in the same organization;
-5. validate that every loan file belongs to the target organization;
-6. validate that each file owner is an active member of that exact organization;
-7. set `loan_files.organization_id` non-null only after validation.
+1. **identity preflight** — reject a WCC legal/display-name collision under another slug;
+2. **deterministic upsert** of `west-coast-capital-mortgage` by unique slug;
+3. **preflight inventory + gate** — emit `RAISE NOTICE` counts (total loan files; distinct
+   `owner_user_id`; distinct existing `organization_id`; files assigned to another org; files with a
+   null owner; target org count by slug; conflicting-identity orgs; owners without target membership),
+   then **REFUSE** (raise `backfill_refused`) if any of: more than one WCC target org exists; a
+   conflicting identity exists under another slug; **any loan file already belongs to another
+   organization** (→ requires an explicit multi-org mapping); or **any loan file has a null owner**
+   (ambiguous — membership cannot be safely created);
+4. **operator-approved assignment** — only after the gate passes (dataset proven to be an unambiguous
+   single-org WCC pilot) are the remaining unassigned files set to WCC, and owner memberships created;
+5. **post-backfill validation** — report zero unmatched rows (`files_not_in_target_org=0`,
+   `owners_without_membership=0`) before `SET NOT NULL`; otherwise raise `backfill_incomplete`.
 
-This is deliberately single-organization pilot backfill logic. A future multi-organization migration must provide an explicit source mapping rather than reuse the single-org assignment.
+A future **multi-organization** dataset is explicitly refused by step 3 and must instead supply a
+reviewed `loan_file_id → organization_id` mapping (never automatic `NULL ⇒ WCC`).
 
 ## Task audience and document constraints
 
@@ -127,4 +135,15 @@ The authored commands are in `OURMTG-TASK-PILOT-ACCEPTANCE.md`. Fake-adapter tes
 
 ## Rollback posture
 
-No database rollback is currently required because the migration remains unapplied. A future approved branch apply must export/retain operational audit data and use a reviewed dependency-order rollback; it must not hard-delete audit history merely to simplify rollback.
+No database rollback is currently required because the migration remains unapplied. The reviewed,
+dependency-ordered rollback companion is **`043_ourmtg_operational_pilot.rollback.sql`** (review source
+only; it hard-guards against execution and keeps every destructive `DROP`/`ALTER` commented). It covers:
+a safety guard + environment warning, a pilot-flags-disabled checklist, pre-rollback inventory counts,
+export/snapshot instructions for `loan_events` / `loan_task_history` / `loan_tasks` /
+`organization_members` / `organizations` / affected `loan_files`, an explicit decision gate before
+deleting immutable audit evidence, the reverse dependency order (RPCs → helpers → history → tasks →
+events → memberships → `loan_files.organization_id` FK/index/column → organizations → immutable trigger
+fn), `ON DELETE RESTRICT` handling (drop referencing tables first; never `CASCADE`), post-rollback
+validation, and the distinction between a disposable isolated-branch rollback and a production
+retention/decommission (which must export/retain audit data — never silently delete it). The rollback
+has **not** been executed.
