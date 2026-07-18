@@ -67,11 +67,21 @@ decision.
 ## Database rollout
 
 `supabase/delta/002_statement_income_analysis.sql` is an idempotent, wrong-project-guarded
-production delta. It is review source only and remains unapplied until separately approved.
+production delta. It was applied to project `diqukqhbmqcheffhensp` on 2026-07-18 after
+explicit approval. Production verification returned both expected tables, RLS enabled, and
+an empty browser-privilege list.
+
+```json
+{
+  "tables": ["statement_income_analyses", "statement_income_months"],
+  "rls_enabled": true,
+  "browser_privileges": []
+}
+```
 
 ## Required acceptance
 
-1. Apply delta 002 only to project `diqukqhbmqcheffhensp` after explicit approval.
+1. Delta 002 applied only to project `diqukqhbmqcheffhensp`; verification passed.
 2. Upload a known 12-month digital PDF package to a test loan.
 3. Compare extracted months and deposit totals to the statements page by page.
 4. Enter exclusions, save, and verify the deterministic result manually.
