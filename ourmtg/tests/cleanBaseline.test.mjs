@@ -24,14 +24,25 @@ test('clean baseline contains every table used by the first browser workflow', (
   }
 })
 
+test('clean baseline matches the live GRCRM projection shape', () => {
+  assert.match(sql, /borrower_name\s+text\s*,/i)
+  assert.doesNotMatch(sql, /borrower_name\s+text\s+not null/i)
+  assert.match(sql, /loan_documents_file\s+on public\.loan_documents \(loan_file_id\)/i)
+  assert.match(sql, /check \(amount is null or amount >= 0\)/i)
+  assert.match(sql, /check \(preapproval_amount is null or preapproval_amount >= 0\)/i)
+})
+
 test('clean baseline keeps the GRCRM heartbeat explicitly optional', () => {
   assert.match(sql, /Operational visibility for the optional GRCRM projector/i)
   assert.match(sql, /create table if not exists public\.cron_heartbeat\b/i)
 })
 
 test('clean baseline keeps the document bucket private', () => {
-  assert.match(sql, /values\s*\('ourmtg-docs',\s*'ourmtg-docs',\s*false\)/i)
-  assert.doesNotMatch(sql, /values\s*\('ourmtg-docs',\s*'ourmtg-docs',\s*true\)/i)
+  assert.match(sql, /'ourmtg-docs',\s*'ourmtg-docs',\s*false,\s*26214400/i)
+  assert.doesNotMatch(sql, /'ourmtg-docs',\s*'ourmtg-docs',\s*true/i)
+  for (const mime of ['application/pdf', 'image/jpeg', 'image/png', 'image/heic', 'image/heif']) {
+    assert.match(sql, new RegExp(`'${mime}'`))
+  }
 })
 
 test('clean baseline excludes the abandoned Phase 1C migration machinery', () => {
@@ -47,6 +58,7 @@ test('clean baseline has final portal roles and no raw strategy browser policy',
   }
   assert.match(sql, /drop policy if exists "portal read approved strategy"/i)
   assert.doesNotMatch(sql, /create policy "portal read approved strategy"/i)
+  assert.match(sql, /revoke all privileges on table public\.loan_strategy from anon, authenticated/i)
 })
 
 test('manual loan-file creation is platform-admin gated in the handler', () => {

@@ -34,7 +34,7 @@ create table if not exists public.loan_files (
   owner_user_id       uuid not null references auth.users(id) on delete cascade,
   source_deal_id      text not null,
   loan_number         text,
-  borrower_name       text not null,
+  borrower_name       text,
   realtor_contact_id  text,
   loan_type           text,
   purpose             text,
@@ -157,7 +157,7 @@ create table if not exists public.loan_documents (
   reviewed_at   timestamptz
 );
 create index if not exists loan_documents_file
-  on public.loan_documents (loan_file_id, requested_at);
+  on public.loan_documents (loan_file_id);
 alter table public.loan_documents enable row level security;
 drop policy if exists "portal read docs" on public.loan_documents;
 create policy "portal read docs" on public.loan_documents
@@ -284,6 +284,7 @@ create trigger t_loan_strategy_upd
   before update on public.loan_strategy
   for each row execute function public.set_updated_at();
 drop policy if exists "portal read approved strategy" on public.loan_strategy;
+revoke all privileges on table public.loan_strategy from anon, authenticated;
 
 create table if not exists public.site_settings (
   id         text primary key default 'default',
@@ -318,9 +319,18 @@ alter table public.cron_heartbeat enable row level security;
 
 -- Financial documents always live in a private bucket. Browser users receive only
 -- short-lived signed URLs from authorized server functions.
-insert into storage.buckets (id, name, public)
-values ('ourmtg-docs', 'ourmtg-docs', false)
-on conflict (id) do update set public = false;
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'ourmtg-docs',
+  'ourmtg-docs',
+  false,
+  26214400,
+  array['application/pdf','image/jpeg','image/png','image/heic','image/heif']::text[]
+)
+on conflict (id) do update set
+  public = false,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
 drop policy if exists "ourmtg-docs public read" on storage.objects;
 
 commit;

@@ -7,13 +7,16 @@ secret retrieval was performed during this inventory.
 
 ## Executive result
 
-The existing production project already exposes every table and every expected column
-needed by the first team-to-borrower browser workflow. The clean baseline must therefore
-not be applied wholesale to this project.
+The existing production project already contains every table and every expected column
+needed by the first team-to-borrower browser workflow. A privileged read-only inventory was
+completed successfully in an explicit read-only transaction. The clean baseline must not be
+applied wholesale to this project.
 
-The safe next database step is a privileged read-only inspection of policies, constraints,
-indexes, triggers, storage buckets, and actual row counts. Only a minimal reviewed delta may
-be prepared after that inspection.
+The core is structurally usable and RLS is enabled everywhere. Three narrow hardening gaps
+were confirmed: raw `loan_strategy.payload` can be selected through an old approved-strategy
+policy, the two non-negative amount checks are missing from `loan_files`, and the private
+document bucket has no database-enforced file-size or MIME allowlist. The guarded,
+unapplied delta is `supabase/delta/001_live_core_hardening.sql`.
 
 ## Connection evidence
 
@@ -55,6 +58,29 @@ Result: **12 of 12 core tables and 101 of 101 expected core columns are present.
 The remaining core tables returned an anonymous count of zero. Because RLS may hide rows,
 that is not evidence that their actual database row counts are zero.
 
+## Privileged row counts
+
+The privileged inventory selected aggregate counts only, never borrower/document contents.
+
+| Object | Rows |
+|---|---:|
+| `auth.users` | 3 |
+| `loan_files` | 2 |
+| `loan_documents` | 1 |
+| `loan_messages` | 2 |
+| `portal_access_log` | 14 |
+| `portal_consent` | 4 |
+| `portal_team` | 1 |
+| `site_settings` | 1 |
+| `loan_conditions` | 0 |
+| `loan_strategy` | 0 |
+| `portal_access` | 0 |
+| `portal_invites` | 0 |
+| `portal_users` | 0 |
+
+Production is therefore **not empty**. No baseline, reset, backfill, or destructive cleanup
+may be run against it.
+
 ## Objects deliberately absent
 
 The following known experimental or later-phase tables returned PostgREST `PGRST205`
@@ -77,31 +103,31 @@ The following known experimental or later-phase tables returned PostgREST `PGRST
 This confirms that the experimental migration 043 task/organization layer is not active in
 the production PostgREST schema and is not required for the first workflow.
 
-## Optional and unresolved objects
+## Privileged security findings
 
 - `cron_heartbeat` is absent. It is used only as a fail-soft operational signal by the
   optional GRCRM projector and is not required for the first borrower/team workflow.
-- A public Storage metadata request reported `Bucket not found` for `ourmtg-docs`. Supabase
-  may conceal a private bucket from a public key, so this result is **inconclusive**. Verify
-  the bucket with a privileged read-only query before creating anything.
-- Public inspection cannot prove the exact RLS policies, constraints, indexes, triggers,
-  table privileges, storage policies, or actual protected row counts.
-- Public inspection cannot prove that `OURMTG_ADMIN_EMAILS` is configured in Netlify.
-
-## Required privileged read-only checks
-
-Before any database write, use a securely injected database URL or Supabase service/admin
-connection to verify:
-
-1. Actual row counts for the 12 core tables, without selecting borrower data.
-2. RLS enabled state and every policy definition on the core tables.
-3. Expected primary keys, foreign keys, unique/check constraints, indexes, and update
-   triggers.
-4. `ourmtg-docs` bucket existence, `public = false`, and absence of public object-read
-   policies.
-5. Function/table grants available to `anon`, `authenticated`, and `service_role`.
-6. Netlify's `OURMTG_ADMIN_EMAILS` allowlist is configured before manual file creation is
-   deployed.
+- RLS is enabled on all 12 existing core tables.
+- The expected identity-bound SELECT policies exist for portal access, conditions,
+  documents, messages, consent, access history, invites, team membership, portal identity,
+  and public site settings.
+- `loan_files` has no browser policy and is server-only, as intended.
+- `loan_strategy` has the old `portal read approved strategy` SELECT policy. Because RLS
+  cannot hide only the raw `payload` column, this policy must be dropped and browser table
+  privileges revoked. The table currently contains zero rows.
+- No browser write policies exist on the core tables. Supabase's broad default table grants
+  are therefore constrained by RLS; service-role Netlify Functions remain the write path.
+- All expected primary keys, foreign keys, role/status checks, unique constraints, indexes,
+  and three `set_updated_at()` triggers are present. The two baseline non-negative amount
+  checks are missing and are included in the guarded delta.
+- `borrower_name` is nullable in production. This is retained intentionally because the
+  existing GRCRM projector permits a contact identified by email or phone before a name is
+  known; manual loan-file creation still requires a name in the server handler.
+- The `ourmtg-docs` bucket exists and is private. There are no public `storage.objects`
+  policies. Its `file_size_limit` and `allowed_mime_types` are unset, so the delta enforces
+  the existing client cap of 25 MB plus PDF/JPEG/PNG/HEIC/HEIF at Storage level.
+- Netlify's `OURMTG_ADMIN_EMAILS` value remains outside database visibility and must be
+  confirmed before the hardened creation handler is deployed.
 
 `supabase/inventory/001_privileged_read_only.sql` returns these sections inside one JSON
 value and one result row so Supabase SQL Editor can export the complete inventory instead
@@ -115,5 +141,8 @@ output, or a browser-visible environment variable.
 - Apply consolidated baseline to the existing project: **NO**.
 - Apply migration 043: **NO**.
 - Create `cron_heartbeat` now: **NO; not required for the first workflow**.
-- Create or modify the Storage bucket now: **NO; privileged verification first**.
-- Prepare a minimal SQL delta after privileged inventory: **YES**.
+- Create or replace workflow tables: **NO; production data exists**.
+- Minimal hardening delta prepared: **YES — reviewed source, unapplied**.
+- Minimal delta contents: **drop/revoke raw strategy browser access; add two guarded amount
+  checks; enforce private Storage + 25 MB/MIME limits**.
+- Apply the minimal delta: **NO until separately approved**.
