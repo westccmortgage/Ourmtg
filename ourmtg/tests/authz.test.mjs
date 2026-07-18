@@ -3,7 +3,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  canSeeFinancials, isInternal, parseAdminEmails, isSettingsAdmin, storageDocPath,
+  canSeeFinancials, isInternal, parseAdminEmails, isPlatformAdmin, isSettingsAdmin, storageDocPath,
 } from '../netlify/functions/_lib/portal.mjs'
 import { isValidDocKey } from '../netlify/functions/_lib/checklist.mjs'
 
@@ -48,6 +48,12 @@ test('A10 decision depends solely on the (JWT) email arg — a spoofed body emai
   // Same trusted email → same verdict regardless of any attacker-controlled payload.
   assert.equal(isSettingsAdmin('borrower@example.com', ADMINS), false)
   assert.equal(isSettingsAdmin('admin@ourmtg.com', ADMINS), true)
+})
+
+test('platform admin allowlist also gates creation of the first loan file', () => {
+  assert.equal(isPlatformAdmin('owner@wcc.com', ADMINS), true)
+  assert.equal(isPlatformAdmin('borrower@example.com', ADMINS), false)
+  assert.equal(isPlatformAdmin('owner@wcc.com', ''), false)
 })
 
 // ── Financial-data + internal gating ─────────────────────────────────────────────────

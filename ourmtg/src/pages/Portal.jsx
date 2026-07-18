@@ -87,7 +87,7 @@ export default function Portal() {
           <div className="spread">
             <div>
               <h2 className="mb0">I’m the loan officer / team</h2>
-              <p className="mb0 muted" style={{ fontSize: 13.5 }}>Create your first loan file and start working it. Team members: ask the LO to add you.</p>
+              <p className="mb0 muted" style={{ fontSize: 13.5 }}>Approved loan-team accounts can create the first file. Team members: ask the LO to add you.</p>
             </div>
             <span className="btn btn-ghost btn-sm">Open desk →</span>
           </div>

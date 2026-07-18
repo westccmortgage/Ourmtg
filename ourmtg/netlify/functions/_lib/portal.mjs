@@ -105,12 +105,11 @@ export function canSeeFinancials(visibility) {
   return visibility === 'owner' || visibility === 'borrower' || visibility === 'coborrower'
 }
 
-// ── Platform administration (site-wide settings) ──────────────────────────────
-// Global site settings (live rate, loan programs, home marketing copy) affect EVERY
-// public visitor, so writing them is a PLATFORM-ADMIN action — deliberately distinct
-// from per-file loan access. Owner decision (Phase 1A #1): loan ownership, including a
-// self-provisioned file, must NEVER confer platform-admin authority. Authorization is
-// therefore an explicit allowlist only: OURMTG_ADMIN_EMAILS.
+// ── Platform administration ───────────────────────────────────────────────────
+// Global settings and creation of a new loan-file owner are PLATFORM-ADMIN actions,
+// deliberately distinct from per-file access. Loan ownership must never bootstrap
+// additional platform authority. Authorization is an explicit allowlist only:
+// OURMTG_ADMIN_EMAILS.
 
 // Parse a comma-separated admin-email allowlist into normalized (trimmed, lowercased)
 // entries. Pure — safe to unit-test.
@@ -123,11 +122,14 @@ export function parseAdminEmails(raw) {
 
 // True IFF `email` is in the configured OURMTG_ADMIN_EMAILS allowlist. An empty/unset
 // allowlist grants NO ONE (fail-closed) — there is no ownership fallback. Pure.
-export function isSettingsAdmin(email, adminEmailsRaw) {
+export function isPlatformAdmin(email, adminEmailsRaw) {
   const e = String(email || '').trim().toLowerCase()
   if (!e) return false
   return parseAdminEmails(adminEmailsRaw).includes(e)
 }
+
+// Compatibility alias for the settings endpoint and its existing contract tests.
+export const isSettingsAdmin = isPlatformAdmin
 
 // Build the SERVER-CONTROLLED storage object path for a borrower document. The path is
 // ALWAYS rooted at <owner>/<loanFile>/… so a caller can never write into another file or
