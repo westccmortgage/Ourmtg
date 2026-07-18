@@ -103,6 +103,10 @@ connection to verify:
 6. Netlify's `OURMTG_ADMIN_EMAILS` allowlist is configured before manual file creation is
    deployed.
 
+`supabase/inventory/001_privileged_read_only.sql` returns these sections inside one JSON
+value and one result row so Supabase SQL Editor can export the complete inventory instead
+of exporting only the final section.
+
 Do not paste the database password or service-role key into chat, source control, build
 output, or a browser-visible environment variable.
 
@@ -113,4 +117,3 @@ output, or a browser-visible environment variable.
 - Create `cron_heartbeat` now: **NO; not required for the first workflow**.
 - Create or modify the Storage bucket now: **NO; privileged verification first**.
 - Prepare a minimal SQL delta after privileged inventory: **YES**.
-

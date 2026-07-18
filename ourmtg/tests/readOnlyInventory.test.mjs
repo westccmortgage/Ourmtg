@@ -30,3 +30,21 @@ test('privileged inventory covers security metadata without selecting borrower c
   }
   assert.doesNotMatch(sql, /select\s+\*\s+from\s+public\./i)
 })
+
+test('privileged inventory returns one exportable JSON result', () => {
+  assert.match(sql, /select jsonb_build_object\([\s\S]*\) as inventory/i)
+  for (const section of [
+    'tables_and_rls',
+    'experimental_tables',
+    'columns',
+    'row_counts',
+    'policies',
+    'constraints',
+    'indexes',
+    'triggers',
+    'storage_buckets',
+    'table_privileges',
+  ]) {
+    assert.match(sql, new RegExp(`'${section}'`))
+  }
+})
