@@ -1,9 +1,11 @@
 -- OurMtg human-reviewed Statement Income Analysis
--- REVIEWED SOURCE ONLY — UNAPPLIED
+-- APPLIED TO PRODUCTION 2026-07-18 — VERIFICATION PASSED
 -- Target Supabase project: diqukqhbmqcheffhensp
 --
 -- Adds server-only analysis records and extracted monthly statement summaries. It does
 -- not expose statement data to browser roles and does not issue a pre-approval.
+-- Production verification returned both expected tables, RLS enabled, and zero
+-- anon/authenticated browser privileges.
 
 begin;
 set local statement_timeout = '30s';
