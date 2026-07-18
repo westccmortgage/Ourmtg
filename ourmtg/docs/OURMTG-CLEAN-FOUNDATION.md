@@ -38,7 +38,10 @@ feature-flag, RPC, backfill, and rollback machinery.
 ## Reconnect
 
 - Point browser and Netlify server variables at `diqukqhbmqcheffhensp`.
-- Apply the clean baseline once after a read-only schema inventory.
+- Treat the clean baseline as the fresh-install reference, not as a migration to run
+  wholesale over the existing project.
+- Run a privileged read-only inventory, compare the existing objects with the baseline,
+  and prepare only the exact reviewed delta that is still needed.
 - Configure Supabase Auth Site URL and redirect URLs for the OurMtg preview.
 - Create one approved loan-team Auth user, one borrower Auth user, and one test loan.
 - Run the complete workflow in separate team and borrower browser sessions.
@@ -56,10 +59,12 @@ They are not part of the clean baseline and must not be applied to the primary p
 
 ## Safety boundary
 
-The baseline is prepared but not automatically applied. Before its first application:
+The baseline is prepared but not automatically applied. Before any database change:
 
 1. Confirm the connected project ref is exactly `diqukqhbmqcheffhensp`.
-2. Run a read-only inventory of the OurMtg table names.
+2. Run a privileged read-only inventory of tables, columns, policies, triggers, indexes,
+   buckets, and actual row counts.
 3. Stop if any table contains operating borrower or document data.
-4. Apply only the clean baseline; do not apply 043.
+4. Do not apply the consolidated baseline to the existing project. Prepare and review a
+   minimal delta only for confirmed missing objects or protections; never apply 043.
 5. Never expose the service-role key or database password to the browser bundle.

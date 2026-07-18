@@ -16,13 +16,17 @@ const requiredTables = [
   'portal_consent',
   'portal_access_log',
   'site_settings',
-  'cron_heartbeat',
 ]
 
 test('clean baseline contains every table used by the first browser workflow', () => {
   for (const table of requiredTables) {
     assert.match(sql, new RegExp(`create table if not exists public\\.${table}\\b`, 'i'), table)
   }
+})
+
+test('clean baseline keeps the GRCRM heartbeat explicitly optional', () => {
+  assert.match(sql, /Operational visibility for the optional GRCRM projector/i)
+  assert.match(sql, /create table if not exists public\.cron_heartbeat\b/i)
 })
 
 test('clean baseline keeps the document bucket private', () => {
