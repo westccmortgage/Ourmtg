@@ -51,11 +51,21 @@ export const getStatus = (loanFileId) =>
 export const getChecklist = (loanFileId) =>
   call(`portal-checklist?loanFileId=${encodeURIComponent(loanFileId)}`)
 
-export const getUploadUrl = (loanFileId, docKey) =>
-  call('portal-doc-upload-url', { method: 'POST', body: { loanFileId, docKey } })
+export const getUploadUrl = (loanFileId, docKey, options = {}) =>
+  call('portal-doc-upload-url', { method: 'POST', body: { loanFileId, docKey, ...options } })
 
-export const completeUpload = (documentId) =>
-  call('portal-doc-complete', { method: 'POST', body: { documentId } })
+export const completeUpload = (documentId, taskContext = null) =>
+  call('portal-doc-complete', {
+    method: 'POST',
+    body: {
+      documentId,
+      ...(taskContext ? {
+        taskId: taskContext.taskId,
+        expectedRevision: taskContext.expectedRevision,
+        idempotencyKey: taskContext.idempotencyKey,
+      } : {}),
+    },
+  })
 
 // ── Loan officer / owner ─────────────────────────────────────────────────────
 export const getReviewQueue = () => call('portal-review-queue')
@@ -94,6 +104,16 @@ export const teamRemove = (memberUserId) =>
 export const saveSettings = (data) =>
   call('portal-settings-set', { method: 'POST', body: { data } })
 
+// ── Task pilot (Phase 1C) ────────────────────────────────────────────────────
+export const listTasks = (loanFileId) =>
+  call(`portal-task-list?loanFileId=${encodeURIComponent(loanFileId)}`)
+export const getTaskDetail = (taskId) =>
+  call(`portal-task-detail?taskId=${encodeURIComponent(taskId)}`)
+export const createTask = (payload) =>
+  call('portal-task-create', { method: 'POST', body: payload })
+export const transitionTask = (taskId, action, extra = {}) =>
+  call('portal-task-transition', { method: 'POST', body: { taskId, action, ...extra } })
+
 // ── Direct RLS reads the gateway doesn't expose (borrower/co-borrower only) ───
 // portal_access is readable by the user (own-grants RLS policy) — this is how the app
 // discovers which loan files to show and at what visibility.
@@ -130,13 +150,24 @@ export async function listMessages(loanFileId) {
 }
 
 // ── Upload a file to a server-minted signed URL, then finalize ───────────────
-export async function uploadDocument(loanFileId, docKey, file) {
-  const signed = await getUploadUrl(loanFileId, docKey)
+export async function uploadDocument(loanFileId, docKey, file, taskContext = null) {
+  const signed = await getUploadUrl(loanFileId, docKey, {
+    contentType: file.type || null,
+    filename: file.name || null,
+    ...(taskContext ? { taskId: taskContext.taskId, documentId: taskContext.requiredDocumentId } : {}),
+  })
+  if (taskContext?.requiredDocumentId && signed.documentId !== taskContext.requiredDocumentId) {
+    throw new ApiError('This upload does not match the requested task document.', 409)
+  }
   const { error } = await supabase()
     .storage.from(signed.bucket)
     .uploadToSignedUrl(signed.path, signed.token, file)
   if (error) throw new ApiError(error.message || 'Upload failed', 500)
-  return completeUpload(signed.documentId)
+  return completeUpload(signed.documentId, taskContext ? {
+    taskId: taskContext.taskId,
+    expectedRevision: taskContext.expectedRevision,
+    idempotencyKey: taskContext.idempotencyKey,
+  } : null)
 }
 
 // ── Lead intake (borrower application + realtor buyer submit) ─────────────────

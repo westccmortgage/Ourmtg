@@ -8,6 +8,8 @@ import { fetchSettings } from '../lib/useSettings'
 import { money, shortDate, relTime } from '../lib/format'
 import { STAGE_LABEL, STAGE_STEPS } from '../lib/pipeline'
 import { Alert, Empty } from '../components/ui'
+import { flag } from '../domain/flags'
+import { filesChangedSince, blockerSummary, filesNeedingBorrowerAction } from '../lib/loanTeamOps'
 
 export default function LODashboard({ files }) {
   const navigate = useNavigate()
@@ -44,6 +46,37 @@ export default function LODashboard({ files }) {
           ))}
         </div>
       </div>
+
+      {/* Phase 1B (flag-gated): deterministic blockers + what changed today. */}
+      {flag('loanTeamWorkspaceV2') && (() => {
+        const nowMs = Date.now()
+        const blockers = blockerSummary(files)
+        const changedToday = filesChangedSince(files, nowMs)
+        const needAction = filesNeedingBorrowerAction(files)
+        return (
+          <div className="card">
+            <div className="card-head"><h2>Blockers &amp; today</h2></div>
+            <div className="metrics">
+              <div className="metric"><span className="lbl">Files with blockers</span><span className="big-num">{blockers.blockingFiles}</span></div>
+              <div className="metric"><span className="lbl">Missing docs</span><span className="big-num">{blockers.missingDocs}</span></div>
+              <div className="metric"><span className="lbl">Open conditions</span><span className="big-num">{blockers.openConditions}</span></div>
+              <div className="metric"><span className="lbl">Awaiting borrower</span><span className="big-num">{needAction.length}</span></div>
+            </div>
+            <div className="card-head" style={{ marginTop: 16 }}><h2 style={{ fontSize: 15 }}>What changed today</h2><span className="chip gray">{changedToday.length}</span></div>
+            {changedToday.length === 0 && <Empty>No file activity in the last 24 hours.</Empty>}
+            {changedToday.map((f) => (
+              <div className="row" key={f.loanFileId} onClick={() => navigate(`/portal/file/${f.loanFileId}`)} style={{ cursor: 'pointer' }}>
+                <div className="grow">
+                  <div className="rlabel">{f.borrowerName || 'Unnamed borrower'}</div>
+                  <div className="rsub">{f.nextAction} · {relTime(f.lastActivity)}</div>
+                </div>
+                <span className="btn btn-ghost btn-sm">Open →</span>
+              </div>
+            ))}
+            <p className="hint" style={{ marginTop: 10 }}>Deterministic from stored file activity — no AI-generated summaries.</p>
+          </div>
+        )
+      })()}
 
       {stuckFiles.length > 0 && (
         <div className="card">

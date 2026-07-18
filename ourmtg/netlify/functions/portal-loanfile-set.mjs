@@ -9,9 +9,9 @@
 // Body (update): { loanFileId, ...any of the fields above }
 //
 // SECURITY
-//   • Create: the caller becomes the file's owner (owner_user_id = caller). A newly
-//     created file contains only what the caller typed and grants access to nobody
-//     else until they mint invites — same trust model as signing up for any CRM.
+//   • Create: platform-admin only (OURMTG_ADMIN_EMAILS). The approved caller becomes
+//     the file owner. A borrower or arbitrary magic-link user can never self-provision
+//     an internal loan-team identity.
 //   • Update: internal only (owner or portal_team member). Never touches
 //     preapproval_* (portal-preapproval-set is the only writer, deliberately).
 //   • Stage changes append a timeline entry so the borrower sees progress.
@@ -19,7 +19,7 @@
 import { admin, isConfigured } from './_lib/supabase.mjs'
 import {
   authUser, json, preflight, loadLoanFile, resolveAccess, isInternal, logAccess,
-  randomToken, STAGE_STEPS, stageInfo,
+  isPlatformAdmin, randomToken, STAGE_STEPS, stageInfo,
 } from './_lib/portal.mjs'
 
 const LOAN_TYPES = new Set(['Conventional', 'FHA', 'VA', 'Jumbo', 'USDA', 'Non-QM', 'DSCR'])
@@ -128,6 +128,9 @@ export default async (req) => {
   }
 
   // ── Create ─────────────────────────────────────────────────────────────────
+  if (!isPlatformAdmin(auth.user.email, process.env.OURMTG_ADMIN_EMAILS)) {
+    return json({ ok: false, error: 'Not authorized to create loan files' }, 403)
+  }
   if (!fields.borrower_name) return json({ ok: false, error: 'borrowerName is required' }, 400)
 
   const { data: ins, error: iErr } = await svc.from('loan_files').insert({

@@ -1,0 +1,73 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+
+const read = (p) => readFile(new URL(`../${p}`, import.meta.url), 'utf8')
+
+test('migration creates+assigns tasks and preserves both transitions', async () => {
+  const sql = await read('docs/phase1c/migration/043_ourmtg_operational_pilot.sql')
+  assert.match(sql, /'assigned',1/)
+  assert.match(sql, /values \(v_task_id,null,'created'/)
+  assert.match(sql, /\(v_task_id,'created','assigned'/)
+  assert.match(sql, /'task\.assigned'/)
+})
+
+test('migration finalize requires in_progress and exact required document', async () => {
+  const sql = await read('docs/phase1c/migration/043_ourmtg_operational_pilot.sql')
+  assert.match(sql, /v_task\.required_document_id is distinct from p_document_id/)
+  assert.match(sql, /v_task\.status<>'in_progress'/)
+  assert.doesNotMatch(sql, /status not in \('created','assigned','viewed'/)
+})
+
+test('database and JS graphs do not allow rejected to reject again', async () => {
+  const [sql, js] = await Promise.all([
+    read('docs/phase1c/migration/043_ourmtg_operational_pilot.sql'),
+    read('netlify/functions/_lib/taskLifecycle.mjs'),
+  ])
+  assert.doesNotMatch(sql, /p_action='reject'[^\n]*'rejected'\)/)
+  assert.match(js, /rejected: \['in_progress', 'reopened', 'cancelled'\]/)
+})
+
+test('database create authority validates organization, participant and exact document', async () => {
+  const sql = await read('docs/phase1c/migration/043_ourmtg_operational_pilot.sql')
+  assert.match(sql, /v_loan\.organization_id is distinct from p_organization_id/)
+  assert.match(sql, /participant_invalid/)
+  assert.match(sql, /required_document_missing/)
+  assert.match(sql, /p_required_document_id/)
+  assert.match(sql, /loan_tasks_audience_check/)
+})
+
+test('task-linked signed upload is bound to task and exact document before storage mutation', async () => {
+  const src = await read('netlify/functions/portal-doc-upload-url.mjs')
+  assert.match(src, /docTaskLinkDecision\(body\.taskId/)
+  assert.match(src, /task\.required_document_id !== existing\.id/)
+  assert.match(src, /task\.status !== 'in_progress'/)
+  assert.match(src, /repo\.borrowerCanSeeTask/)
+})
+
+test('task-linked finalize is request-guarded and invokes no delivery provider', async () => {
+  const src = await read('netlify/functions/portal-doc-complete.mjs')
+  assert.match(src, /readJsonBody\(req\)/)
+  const taskStart = src.indexOf("if (route.mode === 'task')")
+  const legacyStart = src.indexOf("if (route.mode === 'legacy')")
+  assert.ok(taskStart >= 0 && legacyStart > taskStart)
+  assert.doesNotMatch(src.slice(taskStart, legacyStart), /sendPlatformEmail/)
+  assert.match(src, /Task-linked Phase 1C is intent-only/i)
+})
+
+test('team UI requires exact document, verified audience and persistent operations', async () => {
+  const src = await read('src/components/TeamTaskCard.jsx')
+  assert.match(src, /requiredDocumentId/)
+  assert.match(src, /Borrower audience/)
+  assert.match(src, /teamActionsForTask/)
+  assert.match(src, /getOrCreatePendingOperation/)
+  assert.match(src, /reuseExisting: true/)
+})
+
+test('borrower document page renders only the bound request and prepares lifecycle', async () => {
+  const src = await read('src/pages/Documents.jsx')
+  assert.match(src, /i\.documentId === task\.required_document_id/)
+  assert.match(src, /borrowerPreparationActions/)
+  assert.match(src, /expectedRevision/)
+  assert.match(src, /reuseExisting: true/)
+})

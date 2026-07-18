@@ -1,50 +1,82 @@
-// cronGuard.mjs — schedule-only invocation gate for Netlify cron functions.
+// cronGuard.mjs — authorization gate for scheduled/cron functions (Phase 1A Blocker B).
 //
-// isScheduledInvocation(req) returns true when EITHER:
-//   (a) The request carries Netlify's scheduled-event marker: header x-nf-event === 'schedule'.
-//       Netlify sets this on all scheduled invocations; x-nf-* headers cannot be spoofed by
-//       external callers through the Netlify edge.
-//   (b) Header x-cron-secret equals process.env.CRON_SECRET (non-empty string), as a
-//       manual/testing escape hatch. Also used for scheduled HTTP pings when a Netlify
-//       runtime version doesn't forward x-nf-event.
+// AUTHORIZATION MODEL
+//   The ONLY thing that authorizes a cron invocation is a verified shared secret,
+//   OURMTG_CRON_SECRET, presented as an HTTP Bearer credential:
+//       Authorization: Bearer <OURMTG_CRON_SECRET>
+//   Compared in constant time. Fail-closed: if the server secret is unset, NOTHING is
+//   authorized. The secret is NEVER read from the query string and is NEVER logged.
 //
-// NOTE for ops: If x-nf-event is not present in your Netlify runtime version, set CRON_SECRET
-// in your Netlify environment and trigger the cron via a scheduled HTTP ping that sends
-//   x-cron-secret: <CRON_SECRET>
-// instead. Never expose CRON_SECRET publicly — treat it like a password.
+//   Netlify's platform schedule header (x-netlify-event) is retained ONLY as secondary
+//   CONTEXT for diagnostics (hasNetlifyScheduleSignal) — it never authorizes on its own.
+//
+// authorizeCron(req, env) → { ok: boolean, reason: string, scheduled: boolean }
+//   reason ∈ 'ok' | 'no-secret' | 'no-bearer' | 'bad-secret'
+//   scheduled = whether Netlify's schedule signal was present (context only).
+//
+// OPS: set OURMTG_CRON_SECRET in the environment and trigger the projector from an
+// authenticated scheduler (GitHub Actions cron, uptime pinger, etc.) that sends the
+// Authorization: Bearer header. Treat the secret like a password; rotate on exposure.
 
-export function isScheduledInvocation(req) {
-  // (a) Netlify's scheduled-event marker. VERIFIED EMPIRICALLY on this site
-  //     (2026-06-10): the scheduler sends `x-netlify-event` + `x-webhook-signature`,
-  //     and the Netlify bootstrap REJECTS (HTTP 500, before our handler runs) any
-  //     external request carrying x-netlify-event whose signature doesn't verify —
-  //     so if this header reaches our code, the invocation is genuinely Netlify's.
-  if (req.headers.get('x-netlify-event')) return true
-  // Older/alternate runtime marker, kept for safety.
-  if (req.headers.get('x-nf-event') === 'schedule') return true
-
-  // (b) Manual/testing escape hatch via a shared secret.
-  const secret = process.env.CRON_SECRET
-  if (secret && secret.length > 0 && req.headers.get('x-cron-secret') === secret) return true
-
-  return false
+// Constant-time string comparison. Returns false unless both are non-empty equal-length
+// strings with identical bytes (no early exit on first mismatch).
+export function timingSafeEqualStr(a, b) {
+  const x = typeof a === 'string' ? a : ''
+  const y = typeof b === 'string' ? b : ''
+  if (x.length === 0 || y.length === 0) return false
+  if (x.length !== y.length) return false
+  let diff = 0
+  for (let i = 0; i < x.length; i++) diff |= x.charCodeAt(i) ^ y.charCodeAt(i)
+  return diff === 0
 }
 
-// rejectionLog logs the header *keys* (NOT values) of a rejected request so
-// misfires are diagnosable in function logs without leaking secrets.
-export function rejectionLog(req, label) {
-  const keys = [...req.headers.keys()].join(', ')
-  console.warn(`[${label}] Forbidden: not a scheduled invocation. Received header keys: ${keys}`)
+function headerGet(req, name) {
+  if (!req || !req.headers) return ''
+  if (typeof req.headers.get === 'function') return req.headers.get(name) || ''
+  return req.headers[name] || ''
 }
 
-// heartbeat records "this cron ran" in cron_heartbeat so ops can verify the
-// Netlify scheduler actually gets past the gate (vs silently 403ing).
-// Best-effort: never throws, never affects the cron's result.
+// Extract a Bearer token from the Authorization header. Returns '' if absent or if the
+// scheme is not exactly "Bearer" (case-insensitive scheme, exact single space).
+export function bearerToken(req) {
+  const raw = headerGet(req, 'authorization')
+  if (!raw) return ''
+  const m = /^Bearer[ ]([^\s].*)$/i.exec(raw.trim())
+  return m ? m[1].trim() : ''
+}
+
+// Netlify platform schedule signal — CONTEXT ONLY, never authorization.
+export function hasNetlifyScheduleSignal(req) {
+  return !!headerGet(req, 'x-netlify-event') || headerGet(req, 'x-nf-event') === 'schedule'
+}
+
+// Primary authorization decision. `env` defaults to process.env (inject a stub in tests).
+export function authorizeCron(req, env = process.env) {
+  const secret = env?.OURMTG_CRON_SECRET
+  const scheduled = hasNetlifyScheduleSignal(req)
+  if (!secret || String(secret).length === 0) return { ok: false, reason: 'no-secret', scheduled }
+  const token = bearerToken(req)
+  if (!token) return { ok: false, reason: 'no-bearer', scheduled }
+  if (!timingSafeEqualStr(token, String(secret))) return { ok: false, reason: 'bad-secret', scheduled }
+  return { ok: true, reason: 'ok', scheduled }
+}
+
+// rejectionLog logs header *keys* (NOT values) + the reason, so misfires are diagnosable
+// without leaking the secret. Never logs the Authorization value.
+export function rejectionLog(req, label, reason) {
+  const keys = req?.headers?.keys ? [...req.headers.keys()].join(', ') : ''
+  console.warn(`[${label}] Forbidden (${reason || 'unauthorized'}). Received header keys: ${keys}`)
+}
+
+// heartbeat records "this cron ran" in cron_heartbeat so ops can verify the scheduler gets
+// past the gate. Best-effort: never throws, never affects the cron's result. NOTE:
+// cron_heartbeat is NOT created by migrations 036–039 — this write fail-soft-swallows a
+// missing-table error (see OURMTG_DEPLOY.md and draft 042).
 export async function heartbeat(db, name, note) {
   try {
     await db.from('cron_heartbeat').upsert(
       { name, last_run: new Date().toISOString(), ...(note ? { note } : {}) },
       { onConflict: 'name' },
     )
-  } catch { /* non-fatal */ }
+  } catch { /* non-fatal — table may not exist yet */ }
 }

@@ -9,7 +9,10 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "check": "for f in netlify/functions/*.mjs netlify/functions/_lib/*.mjs; do node --check \"$f\"; done && echo ok"
+    "check": "for f in netlify/functions/*.mjs netlify/functions/_lib/*.mjs; do node --check \"$f\"; done && echo ok",
+    "test": "node --test tests/*.test.mjs src/domain/*.test.js",
+    "test:security": "node --test tests/*.test.mjs",
+    "test:domain": "node --test src/domain/*.test.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.107.0",

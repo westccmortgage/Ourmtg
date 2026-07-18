@@ -12,6 +12,8 @@ import { STAGE_STEPS, STAGE_LABEL, STAGE_COLOR } from '../lib/pipeline'
 import StatusTracker from '../components/StatusTracker'
 import MessageThread from '../components/MessageThread'
 import { Alert, Spinner, StatusChip, Empty } from '../components/ui'
+import { flag } from '../domain/flags'
+import TeamTaskCard from '../components/TeamTaskCard'
 
 function DocRow({ doc, onReview }) {
   const [busy, setBusy] = useState(false)
@@ -186,6 +188,9 @@ export default function LoanFileDetail() {
         <StatusTracker stage={file.stage} />
         <FileEditBar file={file} onSaved={load} />
       </div>
+
+      {/* Phase 1C (flag-gated): loan-team task pilot — create/review borrower document tasks. */}
+      {flag('loanTeamTaskPilot') && <TeamTaskCard loanFileId={file.loanFileId} />}
 
       <div className="card">
         <div className="card-head"><h2>Documents</h2>{pending.length > 0 && <span className="chip amber">{pending.length} to review</span>}</div>

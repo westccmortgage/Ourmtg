@@ -6,18 +6,17 @@
 //
 // Body: { data: { rate?, loanTypes?, home? } }  — replaces the settings object.
 //
-// SECURITY
-//   • Caller must be an owner (owns >= 1 loan_file) OR their email is in
-//     OURMTG_ADMIN_EMAILS (comma-separated). Site-wide settings affect every public
-//     visitor, so this is gated tighter than per-file actions.
+// SECURITY  (Phase 1A #1 — platform-admin only)
+//   • Caller's email MUST be in OURMTG_ADMIN_EMAILS (comma-separated allowlist).
+//     Site-wide settings affect every public visitor, so this is a PLATFORM-ADMIN action.
+//     Loan-file ownership — including a self-provisioned file via portal-loanfile-set —
+//     does NOT grant this authority (the old "owns >= 1 loan_file" path was an escalation
+//     and has been removed). An empty/unset allowlist authorizes no one (fail-closed).
 //   • Light validation/sanitization: rate is a bounded number; loanTypes a string
 //     array; home fields are trimmed strings. Never touches app_state.
 
 import { admin, isConfigured } from './_lib/supabase.mjs'
-import { authUser, json, preflight, logAccess } from './_lib/portal.mjs'
-
-const ADMIN_EMAILS = String(process.env.OURMTG_ADMIN_EMAILS || '')
-  .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+import { authUser, json, preflight, logAccess, isSettingsAdmin } from './_lib/portal.mjs'
 
 const clampRate = (v) => {
   const n = Number(v)
@@ -38,15 +37,10 @@ export default async (req) => {
 
   const svc = admin()
 
-  // ── Authorize: admin email, or owns at least one loan file ──────────────────
-  const email = (auth.user.email || '').toLowerCase()
-  let allowed = ADMIN_EMAILS.includes(email)
-  if (!allowed) {
-    const { data: owned } = await svc
-      .from('loan_files').select('id').eq('owner_user_id', auth.user.id).limit(1)
-    allowed = !!(owned && owned.length)
+  // ── Authorize: explicit platform-admin allowlist ONLY (no ownership fallback) ──
+  if (!isSettingsAdmin(auth.user.email, process.env.OURMTG_ADMIN_EMAILS)) {
+    return json({ ok: false, error: 'Not authorized to edit site settings' }, 403)
   }
-  if (!allowed) return json({ ok: false, error: 'Not authorized to edit site settings' }, 403)
 
   const body = await req.json().catch(() => ({}))
   const input = body.data && typeof body.data === 'object' ? body.data : {}

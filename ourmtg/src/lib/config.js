@@ -16,10 +16,29 @@ export const BRAND = {
   company: env.VITE_COMPANY_NAME || 'West Coast Capital Mortgage Inc.',
   loName: env.VITE_LO_NAME || 'Anatoliy',
   nmlsCompany: env.VITE_NMLS_COMPANY || '2817729',
-  nmlsLo: env.VITE_NMLS_LO || '',
+  nmlsLo: env.VITE_NMLS_LO || '2775380',
   officePhone: env.VITE_OFFICE_PHONE || '310-654-1577',
   loPhone: env.VITE_LO_PHONE || '310-686-5053',
   email: env.VITE_CONTACT_EMAIL || 'westccmortgage@gmail.com',
+}
+
+// Verified mortgage-team identity + licensing (Phase 1B §7F). Static compliance facts — shown
+// on the borrower workspace's "Your Mortgage Team" card. Not env-overridable by design.
+export const TEAM = {
+  company: 'West Coast Capital Mortgage Inc.',
+  officePhone: '310-654-1577',
+  directPhone: '310-686-5053',
+  email: 'westccmortgage@gmail.com',
+  officer: {
+    name: 'Anatoliy Kanevsky',
+    title: 'California Real Estate Broker',
+    dreLicense: '01385024',
+    nmls: '2775380',
+  },
+  corporation: {
+    dreLicense: '02440065',
+    nmls: '2817729',
+  },
 }
 
 export const isSupabaseConfigured = () => !!(SUPABASE_URL && SUPABASE_ANON_KEY)

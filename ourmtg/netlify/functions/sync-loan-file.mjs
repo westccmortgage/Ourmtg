@@ -24,17 +24,19 @@
 //   means ON CONFLICT DO UPDATE leaves the existing values intact (and they default
 //   to NULL on first insert). This keeps borrower/Realtor exposure under human control.
 //
-// INVOCATION:
-//   • Netlify scheduler (every 5 min) — verified via cronGuard.isScheduledInvocation.
-//   • Manual/test: POST with header x-cron-secret: <CRON_SECRET>.
-//   The work is light (DB read + batched upserts, no external sends), so it runs
-//   INLINE and time-boxed — no background dispatch needed. Deferred owners resume
-//   next tick (idempotent).
+// INVOCATION (Phase 1A Blocker B — verified Bearer secret is the ONLY authorization):
+//   An authenticated scheduler MUST send:
+//       Authorization: Bearer <OURMTG_CRON_SECRET>
+//   compared in constant time. Netlify's x-netlify-event header is diagnostic context
+//   only — it never authorizes. Fail-closed if OURMTG_CRON_SECRET is unset.
+//   The work is light (DB read + batched upserts, no external sends), so it runs INLINE
+//   and time-boxed — no background dispatch. Deferred owners resume next tick (idempotent).
 //
-// ENV: SUPABASE_URL, SUPABASE_SERVICE_ROLE, CRON_SECRET (for manual trigger).
+// ENV: SUPABASE_URL, SUPABASE_SERVICE_ROLE, OURMTG_CRON_SECRET (required — the sole
+//      cron authorization).
 
 import { admin, isConfigured } from './_lib/supabase.mjs'
-import { isScheduledInvocation, rejectionLog, heartbeat } from './_lib/cronGuard.mjs'
+import { authorizeCron, rejectionLog, heartbeat } from './_lib/cronGuard.mjs'
 
 export const config = { schedule: '*/5 * * * *' } // every 5 minutes (UTC)
 
@@ -158,8 +160,9 @@ export async function runProjection(db, { timeBudgetMs = 18000 } = {}) {
 }
 
 export default async (req) => {
-  if (!isScheduledInvocation(req)) {
-    rejectionLog(req, 'sync-loan-file')
+  const authz = authorizeCron(req)
+  if (!authz.ok) {
+    rejectionLog(req, 'sync-loan-file', authz.reason)
     return new Response('Forbidden', { status: 403 })
   }
   if (!isConfigured()) {
