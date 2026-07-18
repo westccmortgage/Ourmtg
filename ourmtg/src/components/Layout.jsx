@@ -1,6 +1,6 @@
 // App shell: top bar (brand + sign-in/out) and the compliance footer (NMLS + EHO,
 // required on every page per spec §M). Content is rendered via <Outlet/>.
-import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { BRAND } from '../lib/config'
 import { useT, LangSwitch } from '../lib/i18n'
@@ -37,7 +37,9 @@ export function ComplianceFooter() {
 export default function Layout() {
   const { user, signOut } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const t = useT()
+  const portalRoute = location.pathname.startsWith('/portal')
   return (
     <div className="app">
       <header className="topbar">
@@ -57,7 +59,7 @@ export default function Layout() {
         </div>
       </header>
       <main className="main">
-        <div className="container">
+        <div className={`container ${portalRoute ? 'portal-container' : ''}`}>
           <Outlet />
         </div>
       </main>

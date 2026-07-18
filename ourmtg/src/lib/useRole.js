@@ -23,7 +23,7 @@ export function useRole() {
         if (grants.some((g) => g.visibility === 'borrower' || g.visibility === 'coborrower')) roles.push('borrower')
         // Partner group: realtor + third-party milestone-only roles (escrow/title).
         if (grants.some((g) => ['realtor', 'escrow', 'title'].includes(g.visibility))) roles.push('realtor')
-        if (ownedFiles.length) roles.push('lo')
+        if (queue?.internal === true || ownedFiles.length) roles.push('lo')
         setState({ loading: false, error: '', roles, grants, ownedFiles })
       } catch (err) {
         if (alive) setState({ loading: false, error: err?.message || 'Could not load your portal.', roles: [], grants: [], ownedFiles: [] })

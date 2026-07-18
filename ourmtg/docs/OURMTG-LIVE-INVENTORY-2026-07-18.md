@@ -15,8 +15,9 @@ applied wholesale to this project.
 The core is structurally usable and RLS is enabled everywhere. Three narrow hardening gaps
 were confirmed: raw `loan_strategy.payload` can be selected through an old approved-strategy
 policy, the two non-negative amount checks are missing from `loan_files`, and the private
-document bucket has no database-enforced file-size or MIME allowlist. The guarded,
-unapplied delta is `supabase/delta/001_live_core_hardening.sql`.
+document bucket has no database-enforced file-size or MIME allowlist. The guarded delta is
+`supabase/delta/001_live_core_hardening.sql`; it was subsequently approved, applied, and
+verified on 2026-07-18.
 
 ## Connection evidence
 
@@ -142,7 +143,20 @@ output, or a browser-visible environment variable.
 - Apply migration 043: **NO**.
 - Create `cron_heartbeat` now: **NO; not required for the first workflow**.
 - Create or replace workflow tables: **NO; production data exists**.
-- Minimal hardening delta prepared: **YES — reviewed source, unapplied**.
+- Minimal hardening delta prepared: **YES**.
 - Minimal delta contents: **drop/revoke raw strategy browser access; add two guarded amount
   checks; enforce private Storage + 25 MB/MIME limits**.
-- Apply the minimal delta: **NO until separately approved**.
+- Apply the minimal delta: **COMPLETED 2026-07-18 after separate approval**.
+
+## Post-inventory hardening verification
+
+The SQL Editor verification row confirmed all intended results after delta 001:
+
+- `strategy_browser_policy_present`: `false`
+- `strategy_browser_privileges`: `[]`
+- both `loan_files` amount checks present
+- `ourmtg-docs.public`: `false`
+- `ourmtg-docs.file_size_limit`: `26214400`
+- MIME allowlist: PDF, JPEG, PNG, HEIC, HEIF
+
+No baseline, migration 043, borrower-row rewrite, or production deployment was performed.

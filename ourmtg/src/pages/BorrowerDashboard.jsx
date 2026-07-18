@@ -15,6 +15,7 @@ import NeedsAttention from '../components/NeedsAttention'
 import CashToClosePanel from '../components/CashToClosePanel'
 import ThirdPartyPanel from '../components/ThirdPartyPanel'
 import TeamContactCard from '../components/TeamContactCard'
+import { BorrowerStatementIncome } from '../components/StatementIncomePanel'
 
 export default function BorrowerDashboard({ grants }) {
   const [active, setActive] = useState(grants[0]?.loan_file_id || null)
@@ -115,6 +116,8 @@ export default function BorrowerDashboard({ grants }) {
           <span className="btn btn-primary btn-sm">Upload →</span>
         </div>
       </Link>
+
+      <BorrowerStatementIncome loanFileId={active} />
 
       <div className="card">
         <div className="card-head"><h2>Conditions</h2>{openConditions.length > 0 && <span className="chip amber">{openConditions.length} to clear</span>}</div>

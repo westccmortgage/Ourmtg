@@ -79,6 +79,18 @@ export const reviewDoc = (documentId, decision, rejectReason) =>
 export const setPreapproval = (loanFileId, amount, expires) =>
   call('portal-preapproval-set', { method: 'POST', body: { loanFileId, amount, expires } })
 
+export const getStatementAnalysis = (loanFileId) =>
+  call(`portal-statement-analysis?loanFileId=${encodeURIComponent(loanFileId)}`)
+
+export const createStatementAnalysis = (payload) =>
+  call('portal-statement-analysis-create', { method: 'POST', body: payload })
+
+export const saveStatementAnalysis = (payload) =>
+  call('portal-statement-analysis-set', { method: 'POST', body: { ...payload, action: 'save' } })
+
+export const reviewStatementAnalysis = (payload) =>
+  call('portal-statement-analysis-set', { method: 'POST', body: { ...payload, action: 'review' } })
+
 export const createInvite = (payload) =>
   call('portal-invite-create', { method: 'POST', body: payload })
 

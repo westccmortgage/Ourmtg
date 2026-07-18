@@ -10,6 +10,7 @@ import { Alert, Spinner } from '../components/ui'
 import BorrowerDashboard from './BorrowerDashboard'
 import RealtorPortal from './RealtorPortal'
 import LODashboard from './LODashboard'
+import InternalWorkspace from '../components/InternalWorkspace'
 
 const ROLE_LABEL = { borrower: 'My loan', realtor: 'Partner portal', lo: 'Loan team' }
 
@@ -112,9 +113,9 @@ export default function Portal() {
           ))}
         </div>
       )}
-      {active === 'borrower' && <BorrowerDashboard grants={grants.filter((g) => g.visibility === 'borrower' || g.visibility === 'coborrower')} />}
-      {active === 'realtor' && <RealtorPortal grants={grants.filter((g) => ['realtor', 'escrow', 'title'].includes(g.visibility))} />}
-      {active === 'lo' && <LODashboard files={ownedFiles} />}
+      {active === 'borrower' && <div className="borrower-workspace"><BorrowerDashboard grants={grants.filter((g) => g.visibility === 'borrower' || g.visibility === 'coborrower')} /></div>}
+      {active === 'realtor' && <div className="borrower-workspace"><RealtorPortal grants={grants.filter((g) => ['realtor', 'escrow', 'title'].includes(g.visibility))} /></div>}
+      {active === 'lo' && <InternalWorkspace><LODashboard files={ownedFiles} /></InternalWorkspace>}
     </>
   )
 }
