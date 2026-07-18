@@ -1,5 +1,5 @@
 -- OurMtg minimal live-core hardening delta
--- REVIEWED SOURCE ONLY — UNAPPLIED
+-- APPLIED TO PRODUCTION 2026-07-18 — verification passed
 -- Target Supabase project: diqukqhbmqcheffhensp
 --
 -- Derived from the privileged read-only inventory generated at

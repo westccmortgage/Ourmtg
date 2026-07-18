@@ -14,6 +14,7 @@ import MessageThread from '../components/MessageThread'
 import { Alert, Spinner, StatusChip, Empty } from '../components/ui'
 import { flag } from '../domain/flags'
 import TeamTaskCard from '../components/TeamTaskCard'
+import StatementIncomePanel from '../components/StatementIncomePanel'
 
 function DocRow({ doc, onReview }) {
   const [busy, setBusy] = useState(false)
@@ -198,6 +199,8 @@ export default function LoanFileDetail() {
         {documents.map((d) => <DocRow key={d.id} doc={d} onReview={onReview} />)}
         <RequestDocForm loanFileId={file.loanFileId} onCreated={load} />
       </div>
+
+      <StatementIncomePanel loanFileId={file.loanFileId} documents={documents} />
 
       <PreapprovalCard file={file} onSaved={load} />
       <InviteCard file={file} />

@@ -15,6 +15,8 @@ const requiredTables = [
   'loan_messages',
   'portal_consent',
   'portal_access_log',
+  'statement_income_analyses',
+  'statement_income_months',
   'site_settings',
 ]
 
@@ -59,6 +61,19 @@ test('clean baseline has final portal roles and no raw strategy browser policy',
   assert.match(sql, /drop policy if exists "portal read approved strategy"/i)
   assert.doesNotMatch(sql, /create policy "portal read approved strategy"/i)
   assert.match(sql, /revoke all privileges on table public\.loan_strategy from anon, authenticated/i)
+})
+
+test('statement income data is server-only and human-reviewed', () => {
+  const section = sql.slice(
+    sql.indexOf('create table if not exists public.statement_income_analyses'),
+    sql.indexOf('create table if not exists public.site_settings'),
+  )
+  assert.match(sql, /create table if not exists public\.statement_income_analyses/i)
+  assert.match(sql, /status in \('needs_review','reviewed','superseded'\)/i)
+  assert.match(sql, /borrower_visible\s+boolean not null default false/i)
+  assert.match(sql, /revoke all privileges on table public\.statement_income_analyses from anon, authenticated/i)
+  assert.match(sql, /revoke all privileges on table public\.statement_income_months from anon, authenticated/i)
+  assert.doesNotMatch(section, /create policy/i)
 })
 
 test('manual loan-file creation is platform-admin gated in the handler', () => {

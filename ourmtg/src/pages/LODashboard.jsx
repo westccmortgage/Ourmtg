@@ -29,12 +29,16 @@ export default function LODashboard({ files }) {
 
   return (
     <>
-      <div className="spread">
-        <h1 className="mb0">Loan team dashboard</h1>
+      <div className="workspace-page-head" id="overview">
+        <div>
+          <p className="workspace-kicker">Today’s operating view</p>
+          <h1 className="mb0">Loan team dashboard</h1>
+          <p className="muted mb0">One place to see what moved, what is blocked, and what needs a human decision.</p>
+        </div>
         <Link to="/portal/new-file" className="btn btn-primary btn-sm">+ New loan file</Link>
       </div>
 
-      <div className="card">
+      <div className="card workspace-summary" id="review">
         <div className="metrics">
           <div className="metric"><span className="lbl">Active files</span><span className="big-num">{summary.total}</span></div>
           <div className="metric"><span className="lbl">Docs to review</span><span className="big-num">{summary.pendingReview}</span></div>
@@ -93,7 +97,7 @@ export default function LODashboard({ files }) {
         </div>
       )}
 
-      <div className="card">
+      <div className="card" id="pipeline">
         <div className="card-head"><h2>All active files</h2></div>
         {files.length === 0 && <Empty>No active loan files yet. Files appear here as GRCRM deals sync in.</Empty>}
         {files.length > 0 && (
@@ -128,8 +132,8 @@ export default function LODashboard({ files }) {
         <p className="hint" style={{ marginTop: 12 }}>Amounts and pre-approval are managed inside each file. Tap a row to review documents, set pre-approval, or invite the borrower/realtor.</p>
       </div>
 
-      <TeamCard />
-      <SiteSettingsCard />
+      <div id="team"><TeamCard /></div>
+      <div id="settings"><SiteSettingsCard /></div>
     </>
   )
 }

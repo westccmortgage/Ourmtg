@@ -11,7 +11,7 @@
 // unrelated owners.
 
 import { admin, isConfigured } from './_lib/supabase.mjs'
-import { authUser, json, preflight, stageInfo } from './_lib/portal.mjs'
+import { authUser, json, preflight, stageInfo, isPlatformAdmin } from './_lib/portal.mjs'
 import { checklistFor } from './_lib/checklist.mjs'
 
 // MVP heuristic, intentionally simple: a file is "stuck" when it still has missing
@@ -37,6 +37,8 @@ export default async (req) => {
     .select('owner_user_id')
     .eq('member_user_id', auth.user.id)
   if (!tErr) for (const m of memberships || []) ownerIds.push(m.owner_user_id)
+  const recognizedInternal = isPlatformAdmin(auth.user.email, process.env.OURMTG_ADMIN_EMAILS)
+    || (!tErr && (memberships || []).length > 0)
 
   const { data: files, error: fErr } = await svc
     .from('loan_files')
@@ -45,7 +47,7 @@ export default async (req) => {
     .order('updated_at', { ascending: false })
   if (fErr) return json({ ok: false, error: 'Database error' }, 500)
 
-  if (!files || files.length === 0) return json({ ok: true, files: [] })
+  if (!files || files.length === 0) return json({ ok: true, files: [], internal: recognizedInternal })
 
   const ids = files.map((f) => f.id)
   const [{ data: docs }, { data: msgs }, { data: conds }] = await Promise.all([
@@ -108,5 +110,5 @@ export default async (req) => {
     }
   })
 
-  return json({ ok: true, files: rows })
+  return json({ ok: true, files: rows, internal: true })
 }
