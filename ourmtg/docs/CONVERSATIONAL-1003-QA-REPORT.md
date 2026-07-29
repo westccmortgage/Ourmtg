@@ -11,7 +11,7 @@ Run from `ourmtg/` on branch `claude/ourmtg-conversational-1003-mvp`.
 | `npm run test:security` | 0 | **243 tests, 243 pass, 0 fail** (227 pre-existing + 16 new endpoint tests) |
 | `npm run test:domain` | 0 | **5 tests, 5 pass, 0 fail** (pre-existing suite, no regressions) |
 | `npm run test:c1003` | 0 | **43 tests, 43 pass, 0 fail** (new) |
-| `npm test` | 0 | **291 tests, 291 pass, 0 fail** (all suites) |
+| `npm test` | 0 | **293 tests, 293 pass, 0 fail** (all suites) |
 | `./supabase/rehearsal/run-rehearsal.sh` | 0 | **23 checks, 23 pass, 0 fail** — the full migration chain against a real Postgres 16 |
 | `npm run build` | 0 | Built in ~3s. `index.js` 622.07 kB (gzip 191 kB), `index.css` 22.85 kB (gzip 5.68 kB) |
 | `npm audit` | — | 6 vulnerabilities (3 moderate, 3 high) — **all pre-existing on `main`**; verified identical before and after this change |
@@ -77,7 +77,9 @@ passed on the first run.
 | 15 | Skip and resume | ✅ | Skip defers without completing; replaying the event log reproduces identical state and percent |
 | 16 | Language | ✅ | es/ru amounts and months parse identically; employer names stored **verbatim**, never translated |
 | 17 | Duplicate request | ✅ | Re-recording an identical value is a no-op; one event, not two |
-| 18 | Model failure | ✅ | Answer preserved; deterministic next question still produced; nothing fabricated |
+| 18 | Model failure | ✅ | Answer preserved **and captured** by deterministic parsing; interview advances |
+| 18b | Model failure needing real interpretation | ✅ | A date question does not swallow a dollar amount; nothing invented; same field re-asked |
+| 18c | Deterministic parsing scope | ✅ | Never writes secure or demographic fields |
 | 19 | Prompt injection | ✅ | Injected prose never rendered; both extractions discarded; application stays incomplete; `canAttest` false |
 | 20 | Cross-file authorization | ✅ | Engine state is scoped to its own application id |
 

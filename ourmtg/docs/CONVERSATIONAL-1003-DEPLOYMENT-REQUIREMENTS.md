@@ -26,6 +26,27 @@ alone means the API works but no UI is routed. Anything other than `"1"`/`"true"
 | `OURMTG_SECURE_FIELD_KEY` | yes | HMAC key for the secure-field digest. Falls back to `OURMTG_FINGERPRINT_SALT`; set it explicitly. Treat like the service role key. |
 | `ANTHROPIC_BASE_URL` | no | Override for testing |
 
+### Running without a provider key (basic mode)
+
+The feature is usable before an `ANTHROPIC_API_KEY` exists, but the two modes are genuinely
+different and should not be confused:
+
+| | Basic mode (no key) | Full mode (key configured) |
+|---|---|---|
+| Borrower answers the question asked | ✅ captured — deterministic parsing of amounts, dates, yes/no, choices, and an income period stated alongside an amount | ✅ captured |
+| Borrower answers a *different* question | ❌ not captured; the same question is asked again | ✅ captured, explained, and the missing piece re-asked |
+| Several facts in one sentence | ❌ only the asked field | ✅ all of them |
+| Free-form phrasing, es/ru narrative | ❌ only what parses unambiguously | ✅ interpreted |
+
+Basic mode never invents a value: if the text does not parse cleanly as the asked field's type,
+nothing is stored and the question is repeated. Secure and demographic fields are never written
+this way. The borrower is told plainly ("the assistant is running in basic mode right now"), and
+the turn is recorded with `error_code = deterministic_fallback` so the mode is visible after the
+fact.
+
+**The product the brief describes — talk naturally and it fills in what is needed — requires the
+key.** Basic mode is a floor, not the feature.
+
 ### Provider notes
 
 The live adapter uses `fetch` against the Messages API — **no vendor SDK, no new dependency.**

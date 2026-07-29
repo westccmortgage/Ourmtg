@@ -21,6 +21,7 @@ import { detectMisunderstanding, buildRecovery, summarizeSaved } from './misunde
 import { buildConfirmation } from './confirmationPolicy.js'
 import { monthlyEquivalent, detectUnknown, detectDecline } from './normalization.js'
 import { redactSensitive } from './turnContract.js'
+import { deterministicInterpretation } from './deterministicExtract.js'
 
 /**
  * @param state    ApplicationState
@@ -73,7 +74,14 @@ export function processTurn(state, input) {
   }
 
   // ── Extractions ────────────────────────────────────────────────────────────
-  const extractions = interpretation?.extractions || []
+  // When no usable interpretation arrived — no provider configured, a timeout, a refusal, or a
+  // response that failed the contract — fall back to deterministic parsing of the asked field.
+  // A borrower who answers the question directly is still captured; only cross-field
+  // understanding is lost, and that loss is reported to the caller rather than hidden.
+  const effective = interpretation
+    || (resolvedIntent === 'answer' ? deterministicInterpretation({ text: safeText, askedQuestion }) : null)
+  const usedDeterministicFallback = !interpretation && Boolean(effective)
+  const extractions = effective?.extractions || []
   for (const e of extractions) {
     const res = recordValue(working, {
       path: e.fieldPath,
@@ -126,7 +134,7 @@ export function processTurn(state, input) {
   const report = computeCompleteness(working, { asOfMonth, attested, teamAccepted })
 
   // Confusion escalates the NEXT asking of the same question, not the borrower's patience.
-  const confused = Boolean(detection.kind) || interpretation?.answerRelevance === 'unclear'
+  const confused = Boolean(detection.kind) || effective?.answerRelevance === 'unclear'
   if (askedQuestion) history = noteAsked(history, askedQuestion.id, { at, confused })
 
   const nextQuestion = planNextQuestion(working, {
@@ -151,10 +159,11 @@ export function processTurn(state, input) {
   return finish({
     state: working, history, accepted, rejected: rejectedOut, report, nextQuestion,
     message, confirmation, safety, detection, intent: resolvedIntent, at, askedQuestion,
+    usedDeterministicFallback,
   })
 }
 
-function finish({ state, history, accepted, rejected, report, nextQuestion, message = null, confirmation = null, safety, detection = null, intent, at, askedQuestion }) {
+function finish({ state, history, accepted, rejected, report, nextQuestion, message = null, confirmation = null, safety, detection = null, intent, at, askedQuestion, usedDeterministicFallback = false }) {
   return {
     state,
     askedHistory: history,
@@ -167,6 +176,9 @@ function finish({ state, history, accepted, rejected, report, nextQuestion, mess
     detection,
     intent,
     safetyFlags: [...safety],
+    // True when the answer was parsed rather than interpreted — the caller tells the borrower
+    // plainly and the team view can distinguish the two.
+    usedDeterministicFallback,
     at,
     askedQuestionId: askedQuestion?.id || null,
   }

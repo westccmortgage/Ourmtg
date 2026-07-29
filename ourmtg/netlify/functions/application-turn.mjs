@@ -199,7 +199,9 @@ export default async (req) => {
       provider_name: providerMeta.provider || null,
       provider_model: providerMeta.model || null,
       attempts: providerMeta.attempts || 0,
-      error_code: degraded ? 'interpretation_unavailable' : null,
+      error_code: degraded
+        ? (out.usedDeterministicFallback ? 'deterministic_fallback' : 'interpretation_unavailable')
+        : null,
       interpreted_at: new Date().toISOString(),
     })
     await updateApplication(svc, application.id, {
@@ -220,7 +222,13 @@ export default async (req) => {
       nextQuestion: out.nextQuestion,
       // The borrower is told plainly when we could not interpret, and is NOT asked to retype.
       degraded,
-      degradedNotice: degraded ? degradedNotice(locale) : null,
+      // Two very different situations must not share one message: the answer was captured by
+      // deterministic parsing, or nothing was captured at all.
+      degradedNotice: degraded
+        ? (out.usedDeterministicFallback && out.accepted.length
+            ? parsedNotice(locale) : degradedNotice(locale))
+        : null,
+      interpretedBy: interpretation ? 'model' : (out.usedDeterministicFallback ? 'deterministic' : 'none'),
       safetyFlags: out.safetyFlags,
       ...summaries(out.state, out.nextQuestion, locale, asOfMonth, out.report),
     })
@@ -246,6 +254,14 @@ function summaries(state, nextQuestion, locale, asOfMonth, report) {
     canAttest: r.everythingResolved,
   }
 }
+
+// The answer WAS captured — by parsing, not interpretation. Saying "I couldn't read it" here
+// would be false and would make the borrower retype something already stored.
+const parsedNotice = (locale) => ({
+  en: 'Got it. (The assistant is running in basic mode right now, so answer one question at a time.)',
+  es: 'Entendido. (El asistente está en modo básico ahora; responda una pregunta a la vez.)',
+  ru: 'Записал. (Ассистент сейчас работает в базовом режиме — отвечайте по одному вопросу.)',
+}[locale] || 'Got it. (The assistant is running in basic mode right now, so answer one question at a time.)')
 
 const degradedNotice = (locale) => ({
   en: "I saved what you wrote, but I couldn't read it just now. Let's keep going — you don't need to type it again.",

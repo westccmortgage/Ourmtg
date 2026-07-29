@@ -513,7 +513,7 @@ test('17. duplicate request: same idempotency key produces one field event', () 
   assert.equal(second.state.events.length, 1)
 })
 
-test('18. model failure: the answer survives and a deterministic question is still produced', () => {
+test('18. model failure: the answer survives, is still captured, and the interview continues', () => {
   const s = withEmployer(emptyState({ applicationId: 'a18' }))
   const asked = planNextQuestion(s, { asOfMonth: AS_OF, activeGroup: 'employment' })
 
@@ -523,11 +523,45 @@ test('18. model failure: the answer survives and a deterministic question is sti
     interpretation: null, askedHistory: {}, at: AT, asOfMonth: AS_OF, ids: ids(),
   })
 
-  assert.ok(out.nextQuestion, 'a next question is always produced')
-  assert.equal(out.nextQuestion.fieldPath, asked.fieldPath, 'still asking the same field')
-  assert.deepEqual(out.accepted, [], 'nothing is fabricated without an interpretation')
-  // Crucially the engine did not throw and did not lose the turn.
+  // A borrower who answered the question directly is captured by deterministic parsing — no
+  // provider required. Losing the answer here would be the dead end §24 forbids.
+  assert.equal(out.usedDeterministicFallback, true)
+  assert.equal(fieldValue(out.state, 'parties[0].employment[0].startDate'), '2023-03')
+  assert.equal(out.accepted.length, 1)
+  // The interview moves on rather than re-asking something already answered.
+  assert.ok(out.nextQuestion)
+  assert.notEqual(out.nextQuestion.fieldPath, asked.fieldPath)
   assert.equal(out.report.status, 'in_progress')
+})
+
+test('18b. model failure on an answer that needs real interpretation: nothing is invented', () => {
+  const s = withEmployer(emptyState({ applicationId: 'a18b' }))
+  const asked = planNextQuestion(s, { asOfMonth: AS_OF, activeGroup: 'employment' })
+
+  // The borrower answers a DIFFERENT question than the one asked. Understanding that requires
+  // the model; deterministic parsing must decline rather than guess.
+  const out = processTurn(s, {
+    turnId: 't', text: 'I made about $160,000 during those two years', askedQuestion: asked,
+    interpretation: null, askedHistory: {}, at: AT, asOfMonth: AS_OF, ids: ids(),
+  })
+
+  assert.deepEqual(out.accepted, [], 'a date question must not swallow a dollar amount')
+  assert.equal(fieldStatus(out.state, 'parties[0].employment[0].startDate'), 'missing')
+  // Still no dead end: the same field is asked again and the turn was not lost.
+  assert.equal(out.nextQuestion.fieldPath, asked.fieldPath)
+  assert.equal(out.report.status, 'in_progress')
+})
+
+test('18c. deterministic parsing never touches secure or demographic fields', () => {
+  const s = emptyState({ applicationId: 'a18c' })
+  for (const path of ['parties[0].ssn', 'parties[0].demographics.race']) {
+    const asked = { id: `field:${path}`, fieldPath: path, prompt: 'q', dataType: 'text' }
+    const out = processTurn(s, {
+      turnId: 't', text: '123-45-6789 white', askedQuestion: asked,
+      interpretation: null, askedHistory: {}, at: AT, asOfMonth: AS_OF, ids: ids(),
+    })
+    assert.deepEqual(out.accepted, [], `${path} must never be filled by parsing`)
+  }
 })
 
 test('19. prompt injection: no fields fabricated, application stays incomplete', () => {
