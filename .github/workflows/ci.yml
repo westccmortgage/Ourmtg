@@ -35,5 +35,10 @@ jobs:
       - name: Security & authorization tests (Phase 1A)
         run: npm run test:security
 
+      # Conversational 1003 lives outside tests/ and src/domain/, so it needs its own step —
+      # without this the catalog, rules, and the 20 borrower scenarios go unverified in CI.
+      - name: Conversational 1003 engine & scenario tests
+        run: npm run test:c1003
+
       - name: Build the SPA
         run: npm run build

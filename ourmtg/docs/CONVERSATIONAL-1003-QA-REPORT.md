@@ -8,10 +8,10 @@ Run from `ourmtg/` on branch `claude/ourmtg-conversational-1003-mvp`.
 |---|---|---|
 | `npm ci` | 0 | Installed from lockfile. **No dependencies added or changed.** |
 | `npm run check` | 0 | `ok` — `node --check` on all 31 function + lib modules |
-| `npm run test:security` | 0 | **227 tests, 227 pass, 0 fail** (pre-existing suite, no regressions) |
+| `npm run test:security` | 0 | **243 tests, 243 pass, 0 fail** (227 pre-existing + 16 new endpoint tests) |
 | `npm run test:domain` | 0 | **5 tests, 5 pass, 0 fail** (pre-existing suite, no regressions) |
 | `npm run test:c1003` | 0 | **43 tests, 43 pass, 0 fail** (new) |
-| `npm test` | 0 | **275 tests, 275 pass, 0 fail** (all suites) |
+| `npm test` | 0 | **291 tests, 291 pass, 0 fail** (all suites) |
 | `npm run build` | 0 | Built in ~3s. `index.js` 622.07 kB (gzip 191 kB), `index.css` 22.85 kB (gzip 5.68 kB) |
 | `npm audit` | — | 6 vulnerabilities (3 moderate, 3 high) — **all pre-existing on `main`**; verified identical before and after this change |
 
@@ -20,13 +20,40 @@ Run from `ourmtg/` on branch `claude/ourmtg-conversational-1003-mvp`.
 - `npm run test:c1003` — the feature's own suite
 - `npm test` now also runs `src/features/conversational-1003/*.test.js`
 
-## Test breakdown (43 new)
+## Test breakdown (59 new)
 
 | File | Tests | Covers |
 |---|---|---|
-| `scenarios.test.js` | 23 | The 20 required borrower scenarios + 3 supporting units |
-| `contract.test.js` | 18 | Catalog, rules, turn contract, prompt, confirmation policy, attestation invariants |
-| `e2e.test.js` | 2 | Full application to attestation; planner-loop safety |
+| `src/features/.../scenarios.test.js` | 23 | The 20 required borrower scenarios + 3 supporting units |
+| `src/features/.../contract.test.js` | 18 | Catalog, rules, turn contract, prompt, confirmation policy, attestation invariants |
+| `src/features/.../e2e.test.js` | 2 | Full application to attestation; planner-loop safety |
+| `tests/applicationEndpoints.test.mjs` | 16 | All six HTTP endpoints over an in-memory PostgREST/GoTrue stand-in |
+
+### Endpoint tests (`tests/applicationEndpoints.test.mjs`)
+
+These drive the **actual Netlify handlers** with the **real** `@supabase/supabase-js` client;
+only the database behind it is faked (at the HTTP layer, so real URL building, filter encoding,
+and error-shape handling all execute). They were the first endpoint-level tests in this repo and
+passed on the first run.
+
+| Verified | Result |
+|---|---|
+| Flag OFF → every endpoint 404s | ✅ and **zero database calls are made** |
+| No bearer token → 401 | ✅ and zero database calls |
+| Realtor reaching the application | ✅ 403; no application or party row created |
+| Stranger, and borrower guessing another loan file | ✅ 403 both |
+| Session bootstrap | ✅ creates one application + party, scoped to `organization_id`; a second call creates neither again |
+| Turn with no provider configured | ✅ answer persisted, `failed_safe`, borrower told not to retype, interview still advances |
+| Idempotency replay / conflict | ✅ replay returns `deduped` with one turn row; different payload → 409, still one row |
+| Secure fields | ✅ non-secure path 400; malformed SSN 400 and nothing stored; valid one stores only last-four + 64-char digest — plaintext absent from the row, the event log, **and** the projection |
+| Attestation gate | ✅ 409 while items are open, and the open items are enumerated back |
+| Stale attestation version | ✅ 409, nothing recorded |
+| Team review | ✅ borrower 403 / owner 200 with provenance and per-party progress |
+| Accept before borrower attested | ✅ 409 |
+| Team correction | ✅ appends `team_entry` / `team_confirmed` with actor; secure field 400 |
+| Unknown field path on confirm | ✅ 400 |
+| Malformed input (bad uuid, short key, empty text) | ✅ 400 before any database access |
+| Mock provider selection | ✅ refused without explicit opt-in; never a silent fallback |
 
 ## The 20 required scenarios (§28)
 
@@ -82,14 +109,16 @@ database and the live AI provider were not involved.
 |---|---|
 | AI provider (tests) | Deterministic `mockProvider` — parses with the same normalizers, never guesses |
 | AI provider (production) | Live `fetch` adapter written; **not exercised against the real API** (no key in this environment) |
-| Database | **Not exercised.** Migration 003 is written but not applied; no live read/write has been performed |
+| Database | In-memory PostgREST/GoTrue stand-in for endpoint tests. Migration 003 is written but **not applied**; no real Postgres read/write has been performed |
 | Voice transcription | Browser `SpeechRecognition` only; no server provider exists |
 | LOS / AUS export | Null adapter that validates, previews, and **refuses** to export |
 
 ## Not executed
 
-- **Any database operation.** No migration applied; the repo layer, all six endpoints, RLS, and
-  idempotency-at-the-database-level are verified by code review and import checks only.
+- **A real Postgres.** The endpoint tests use an in-memory stand-in, so **RLS policies, foreign
+  keys, and check constraints from migration 003 remain unverified** — those can only be proven
+  against a real database. Handler logic, authorization, idempotency (including the 23505
+  unique-violation path), and the append-only write path *are* now covered.
 - **A live provider call.** No `ANTHROPIC_API_KEY` in this environment.
 - **A real borrower session** end to end through HTTP.
 - **Multi-party (co-borrower) flow through the endpoints** — engine-level only.
@@ -105,6 +134,7 @@ database. See `CONVERSATIONAL-1003-DEPLOYMENT-REQUIREMENTS.md`.
 
 | Defect | Where | Fix |
 |---|---|---|
+| CI never ran the feature's own suite (it lives outside `tests/` and `src/domain/`) | `.github/workflows/ci.yml` | Added a `test:c1003` step |
 | Cyrillic frequency terms never matched (`\b` is ASCII-only in JS) | `normalization.js` | Unicode-aware `\p{L}` boundaries |
 | Secure fields could not be written even by the secure control (type normalizers reject everything) | `applicationReducer.js` | Mask-only write path that also rejects anything containing a long digit run |
 | History backfill fired before existing records were filled in — asked "where did you work before that?" while the current job's start date was blank | `completenessEngine.js` | `collectHistory` returns null until existing records are complete |
