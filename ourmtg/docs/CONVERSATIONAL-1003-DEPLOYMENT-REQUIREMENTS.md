@@ -47,6 +47,22 @@ All are server-only: RLS enabled, `anon`/`authenticated` privileges revoked — 
 `statement_income_analyses`. The script refuses to run against a database that lacks
 `loan_files`/`portal_access`, and ends with a verification query mirroring delta 002's.
 
+### Rehearsed against a real Postgres
+
+The full chain (baseline `001` → delta `001` → `002` → `003`) has been applied to a throwaway
+Postgres 16 and verified: 7 tables, RLS on, zero browser privileges, idempotent re-run, guard
+clause fires on a foreign database, every check and unique constraint rejects bad data, cascade
+delete works, and the rollback is clean — **23/23 checks pass.**
+
+Re-run it any time (it never touches a real project):
+
+```bash
+./supabase/rehearsal/run-rehearsal.sh
+```
+
+This does **not** replace applying it to an isolated Supabase project: RLS under a real
+`anon`/`authenticated` JWT, GoTrue, and the storage API are Supabase-specific and still unproven.
+
 **Apply order:** after `supabase/delta/002_statement_income_analysis.sql`.
 **Authorization required:** owner approval, against an isolated database first. Do not apply to
 production as part of this change.
@@ -74,7 +90,8 @@ not touch anything that shipped before this feature.
 Before a real borrower touches this:
 
 - [ ] Compliance sign-off on all 8 ⚠ items in `CONVERSATIONAL-1003-COMPLIANCE-REVIEW.md`
-- [ ] Apply migration 003 to an isolated database and run its verification query
+- [x] ~~Rehearse the migration chain against a real Postgres~~ — done, 23/23 (`run-rehearsal.sh`)
+- [ ] Apply migration 003 to an isolated **Supabase** project and run its verification query
 - [ ] Configure `ANTHROPIC_API_KEY` and `OURMTG_SECURE_FIELD_KEY` in Netlify
 - [ ] Confirm `CONVERSATIONAL_1003_ALLOW_MOCK` is **unset** in production
 - [ ] End-to-end test against the isolated database with a fictional borrower
