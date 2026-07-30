@@ -16,9 +16,9 @@ Configured in the repo-root `netlify.toml` `[[headers]]` blocks. Applied by Netl
 ```
 default-src 'self';
 script-src 'self';
-style-src 'self' 'unsafe-inline';
+style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
 img-src 'self' data:;
-font-src 'self' data:;
+font-src 'self' data: https://fonts.gstatic.com;
 connect-src 'self' https://*.supabase.co wss://*.supabase.co;
 frame-ancestors 'none';
 base-uri 'self';
@@ -33,6 +33,13 @@ object-src 'none'
 | `https://*.supabase.co` | connect-src | Supabase Auth (magic link), Storage, signed-URL upload/download |
 | `wss://*.supabase.co` | connect-src | Supabase client websocket (auth/realtime channel if opened) |
 | `data:` | img-src, font-src | QR code data URLs (`QRCode.jsx`), the app icon/manifest |
+| `https://fonts.googleapis.com` | style-src | the Google Fonts stylesheet linked from `index.html` (Anton, IBM Plex Mono, Schibsted Grotesk) |
+| `https://fonts.gstatic.com` | font-src | the font files that stylesheet references |
+
+**Deliberately NOT allowed:** `https://static.cloudflareinsights.com`. If the domain sits behind
+Cloudflare, its analytics beacon is injected and blocked by `script-src`. That is a console
+warning, not a broken feature — allowing a third-party script origin is a real weakening of the
+CSP and should be a deliberate decision, not a side effect of silencing a warning.
 
 ### Why `'unsafe-inline'` for styles (only)
 The React app uses inline `style={{…}}` attributes throughout. CSP `style-src` blocks inline style attributes without `'unsafe-inline'`, so it is required for styles. **Scripts do not use inline** — `script-src 'self'` stays strict (the Vite bundle is external + content-hashed). Removing the inline-style dependency (e.g. moving to classes) is a future hardening to enable a stricter `style-src`.

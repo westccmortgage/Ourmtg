@@ -29,14 +29,16 @@
 # ── Security headers (Phase 1A §10) ──────────────────────────────────────────────
 # Applied to every response. The CSP is deliberately conservative but compatible with the
 # existing app: hashed self-hosted JS/CSS (no inline <script>), inline STYLE attributes
-# (React style={{}} — hence style-src 'unsafe-inline'), QR/icon data: URLs, and Supabase
-# for auth/storage/signed-URL fetches (https + wss *.supabase.co). Required external
+# (React style={{}} — hence style-src 'unsafe-inline'), QR/icon data: URLs, Supabase
+# for auth/storage/signed-URL fetches (https + wss *.supabase.co), and the Google Fonts
+# stylesheet + font files that index.html has always linked (they were being BLOCKED in
+# production, so the site rendered in system fonts). Required external
 # origins are documented in docs/OURMTG-SECURITY-HEADERS.md — update the CSP if a new one
 # is added (e.g. analytics), or the app will break.
 [[headers]]
   for = "/*"
   [headers.values]
-    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
     X-Content-Type-Options = "nosniff"
     X-Frame-Options = "DENY"
     Referrer-Policy = "strict-origin-when-cross-origin"
