@@ -18,6 +18,9 @@ import Portal from './pages/Portal'
 import Documents from './pages/Documents'
 import LoanFileDetail from './pages/LoanFileDetail'
 import NewLoanFile from './pages/NewLoanFile'
+import ApplicationAssistant from './features/conversational-1003/pages/ApplicationAssistant'
+import ApplicationTeamReview from './features/conversational-1003/pages/ApplicationTeamReview'
+import { conversational1003Enabled } from './features/conversational-1003/clientFlag'
 
 function NotFound() {
   return (
@@ -51,6 +54,14 @@ export default function App() {
             <Route path="portal/documents/:loanFileId" element={<RequireAuth><Documents /></RequireAuth>} />
             <Route path="portal/file/:loanFileId" element={<RequireAuth><LoanFileDetail /></RequireAuth>} />
             <Route path="portal/new-file" element={<RequireAuth><NewLoanFile /></RequireAuth>} />
+            {/* Conversational 1003 — default OFF. The client flag only hides the UI; the
+                gateway functions enforce CONVERSATIONAL_1003_ENABLED server-side regardless. */}
+            {conversational1003Enabled() && (
+              <>
+                <Route path="application/assistant/:loanFileId" element={<RequireAuth><ApplicationAssistant /></RequireAuth>} />
+                <Route path="portal/file/:loanFileId/application" element={<RequireAuth><ApplicationTeamReview /></RequireAuth>} />
+              </>
+            )}
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>
