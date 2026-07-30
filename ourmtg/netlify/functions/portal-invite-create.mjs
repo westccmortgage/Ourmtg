@@ -20,8 +20,16 @@ import { authUser, json, preflight, resolveAccess, isInternal, logAccess, random
 import { sendPlatformEmail, brandedEmail, esc } from './_lib/mailer.mjs'
 
 const ROLES = new Set(['borrower', 'coborrower', 'realtor', 'escrow', 'title'])
+// Landing spots an invite may point at. The portal dashboard stays the default; these exist so
+// a link minted for one purpose ("fill out your application", "send me the bank statements")
+// opens on that purpose instead of a dashboard the invitee has to navigate.
+const DESTINATIONS = new Set(['application', 'documents'])
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const OURMTG_URL = (process.env.OURMTG_URL || 'https://ourmtg.com').replace(/\/$/, '')
+// Short host for application links, so what you paste into a text message is readable. Falls
+// back to the main site, which serves the same /1003/:token route — the short host is a
+// convenience, never a requirement, and an unconfigured DNS record must not break invites.
+const SHORT_1003_URL = (process.env.OURMTG_1003_URL || `${OURMTG_URL}/1003`).replace(/\/$/, '')
 
 export default async (req) => {
   if (req.method === 'OPTIONS') return preflight()
@@ -38,6 +46,9 @@ export default async (req) => {
   const phone = body.phone ? String(body.phone).trim() : null
   const name = body.name ? String(body.name).trim().slice(0, 120) : null
   const expiresInDays = Math.min(Math.max(parseInt(body.expiresInDays, 10) || 14, 1), 60)
+  // Where the invitee lands after redeeming. An allowlist, not free text: this value ends up in
+  // a URL we email, so anything unrecognized is dropped rather than echoed back.
+  const destination = DESTINATIONS.has(body.destination) ? body.destination : null
 
   if (!loanFileId) return json({ ok: false, error: 'Missing loanFileId' }, 400)
   if (!ROLES.has(role)) return json({ ok: false, error: 'Invalid role' }, 400)
@@ -80,29 +91,37 @@ export default async (req) => {
     portalUser: null, loanFileId, action: 'invite_created', target: email || phone, req,
   })
 
-  const inviteUrl = `${OURMTG_URL}/invite?token=${token}`
+  const inviteUrl = `${OURMTG_URL}/invite?token=${token}${destination ? `&go=${destination}` : ''}`
+  // The short form is for texting and reading aloud on a phone call. It carries the same token
+  // and lands on the same redemption; it is shorter, not weaker.
+  const shortUrl = destination === 'application' ? `${SHORT_1003_URL}/${token}` : null
 
   // Best-effort email delivery (fail-soft — the link is returned regardless).
   let emailed = false
   if (email) {
+    const application = destination === 'application'
     const roleWord = role === 'realtor' ? 'track your buyer’s loan'
       : (role === 'escrow' || role === 'title') ? 'track this transaction’s milestones'
       : 'start and track your loan'
     const html = brandedEmail({
-      heading: 'Your secure loan portal is ready',
-      intro: `You’ve been invited to ${esc(roleWord)} securely with West Coast Capital Mortgage.`,
+      heading: application ? 'Your application is ready for you' : 'Your secure loan portal is ready',
+      intro: application
+        ? 'Instead of filling out a form, you can just answer in your own words — the assistant fills out the application for you.'
+        : `You’ve been invited to ${esc(roleWord)} securely with West Coast Capital Mortgage.`,
       bodyHtml: '<p style="color:#374151;font-size:15px;line-height:1.6;margin:0">Tap below to sign in — no password needed. Your link is private to you.</p>',
-      cta: { text: 'Open your portal', url: inviteUrl },
+      cta: { text: application ? 'Start my application' : 'Open your portal', url: inviteUrl },
       note: `This invitation expires in ${expiresInDays} days. Equal Housing Opportunity.`,
     })
     const r = await sendPlatformEmail({
       to: email,
-      subject: 'Your secure loan portal — West Coast Capital Mortgage',
+      subject: destination === 'application'
+        ? 'Start your loan application — West Coast Capital Mortgage'
+        : 'Your secure loan portal — West Coast Capital Mortgage',
       html,
       text: `You've been invited to your secure loan portal.\nOpen: ${inviteUrl}\nThis link expires in ${expiresInDays} days.`,
     })
     emailed = !!r.ok
   }
 
-  return json({ ok: true, inviteId: invite.id, inviteUrl, role, expiresAt, emailed })
+  return json({ ok: true, inviteId: invite.id, inviteUrl, shortUrl, role, expiresAt, emailed })
 }

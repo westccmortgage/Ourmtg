@@ -16,6 +16,7 @@ import { flag } from '../domain/flags'
 import TeamTaskCard from '../components/TeamTaskCard'
 import StatementIncomePanel from '../components/StatementIncomePanel'
 import { conversational1003Enabled } from '../features/conversational-1003/clientFlag'
+import TeamDocUpload from '../components/TeamDocUpload'
 
 function DocRow({ doc, onReview }) {
   const [busy, setBusy] = useState(false)
@@ -96,19 +97,38 @@ function PreapprovalCard({ file, onSaved }) {
 function InviteCard({ file }) {
   const [role, setRole] = useState('borrower')
   const [email, setEmail] = useState('')
+  // An invite sent for a reason should open on that reason. Only the two borrower roles can be
+  // pointed at the application or the upload page — a realtor has neither.
+  const [destination, setDestination] = useState('portal')
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
+  const [copied, setCopied] = useState(false)
+
+  const isBorrowerSide = role === 'borrower' || role === 'coborrower'
+  const effectiveDestination = isBorrowerSide ? destination : 'portal'
 
   async function invite(e) {
     e.preventDefault()
     setBusy(true); setError(''); setResult(null)
     try {
-      const r = await createInvite({ loanFileId: file.loanFileId, role, email })
+      const r = await createInvite({
+        loanFileId: file.loanFileId, role, email,
+        ...(effectiveDestination === 'portal' ? {} : { destination: effectiveDestination }),
+      })
       setResult(r)
       setEmail('')
     } catch (err) { setError(err?.message || 'Could not create invite.') }
     finally { setBusy(false) }
+  }
+
+  async function copyLink(text) {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true); setTimeout(() => setCopied(false), 2000)
+    } catch {
+      setError('Copy is blocked in this browser. Select the link and copy it manually.')
+    }
   }
 
   return (
@@ -119,7 +139,13 @@ function InviteCard({ file }) {
         <Alert kind="ok">
           Invite created{result.emailed ? ' and emailed' : ''}. Share this link if needed:
           <div className="field" style={{ marginTop: 8, marginBottom: 0 }}>
-            <input readOnly value={result.inviteUrl} onFocus={(e) => e.target.select()} />
+            <input readOnly value={result.shortUrl || result.inviteUrl} onFocus={(e) => e.target.select()} />
+          </div>
+          <div className="pill-row" style={{ marginTop: 10 }}>
+            <button type="button" className="btn btn-sm"
+                    onClick={() => copyLink(result.shortUrl || result.inviteUrl)}>
+              {copied ? 'Copied' : 'Copy link'}
+            </button>
           </div>
         </Alert>
       )}
@@ -140,6 +166,17 @@ function InviteCard({ file }) {
             <input id="ie" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} inputMode="email" />
           </div>
         </div>
+        {isBorrowerSide && (
+          <div className="field">
+            <label htmlFor="idst">Open on</label>
+            <select id="idst" value={destination} onChange={(e) => setDestination(e.target.value)}>
+              <option value="portal">Their portal</option>
+              <option value="application">Their application — answer in their own words</option>
+              <option value="documents">Their documents — upload what you asked for</option>
+            </select>
+            <p className="hint">Sets where the link lands. Access is the same either way.</p>
+          </div>
+        )}
         <button className="btn btn-navy btn-sm" disabled={busy || !email}>{busy ? 'Sending…' : 'Send invite'}</button>
       </form>
     </div>
@@ -215,6 +252,8 @@ export default function LoanFileDetail() {
         {documents.map((d) => <DocRow key={d.id} doc={d} onReview={onReview} />)}
         <RequestDocForm loanFileId={file.loanFileId} onCreated={load} />
       </div>
+
+      <TeamDocUpload loanFileId={file.loanFileId} onUploaded={load} />
 
       <StatementIncomePanel loanFileId={file.loanFileId} documents={documents} />
 

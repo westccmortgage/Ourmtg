@@ -18,6 +18,31 @@
   # is protection we want to keep.
   SECRETS_SCAN_OMIT_KEYS = "SUPABASE_URL,SUPABASE_ANON_KEY,VITE_SUPABASE_URL,VITE_SUPABASE_ANON_KEY"
 
+# Short host for application links: 1003.ourmtg.com/<token> → ourmtg.com/1003/<token>.
+# The point is what gets pasted into a text message and read aloud on a phone call, so the
+# redirect happens after the borrower taps — the app itself stays on one origin, which keeps
+# the CSP, the Supabase session, and the auth redirect URLs unchanged.
+#
+# This rule is inert until 1003.ourmtg.com is added as a domain alias in Netlify and its DNS
+# points here. Until then the same route is reachable at ourmtg.com/1003/<token>, which is what
+# portal-invite-create falls back to — so an unconfigured DNS record cannot break invites.
+# MUST stay above the SPA catch-all: Netlify applies the first matching rule.
+#
+# The bare host is listed FIRST: the splat below also matches "/" with an empty splat, which
+# would land on /1003/ — a route with no token, i.e. a 404 for someone who just typed the
+# domain out of curiosity. First match wins, so this one has to come before it.
+[[redirects]]
+  from = "https://1003.ourmtg.com/"
+  to = "https://ourmtg.com/"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "https://1003.ourmtg.com/*"
+  to = "https://ourmtg.com/1003/:splat"
+  status = 301
+  force = true
+
 # SPA history fallback: client-side routing (react-router) serves index.html for any
 # non-file, non-function path. Netlify resolves /.netlify/functions/* and real assets
 # BEFORE this catch-all, so the API and static files are never shadowed.
