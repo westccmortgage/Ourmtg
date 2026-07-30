@@ -101,6 +101,17 @@ translation exists.
 the pilot. A borrower interviewed in Spanish who then sees English-only declarations is a real UX
 and possibly compliance problem that this MVP does not solve.
 
+**Owner decision, 2026-07-30 (Anatoliy Kanevsky):** documents are English only. The controlling
+declaration and attestation text stays English and is not translated; the interview itself may
+continue in Spanish and Russian. This is what the code already does, so no change was required —
+it is recorded here so the behavior reads as a decision rather than an oversight.
+
+What this decision does NOT settle: a borrower interviewed in Spanish still reaches an
+English-only attestation. The on-screen courtesy-translation label is the only thing currently
+mitigating that. If the pilot ever serves a borrower with limited English proficiency, this needs
+revisiting — the decision above resolves which text controls, not whether that borrower
+understood it.
+
 ## 5. Statements the product must never make
 
 Enforced in code and asserted by tests (`report.notMeaning`):

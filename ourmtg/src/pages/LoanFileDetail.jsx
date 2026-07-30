@@ -15,6 +15,7 @@ import { Alert, Spinner, StatusChip, Empty } from '../components/ui'
 import { flag } from '../domain/flags'
 import TeamTaskCard from '../components/TeamTaskCard'
 import StatementIncomePanel from '../components/StatementIncomePanel'
+import { conversational1003Enabled } from '../features/conversational-1003/clientFlag'
 
 function DocRow({ doc, onReview }) {
   const [busy, setBusy] = useState(false)
@@ -192,6 +193,21 @@ export default function LoanFileDetail() {
 
       {/* Phase 1C (flag-gated): loan-team task pilot — create/review borrower document tasks. */}
       {flag('loanTeamTaskPilot') && <TeamTaskCard loanFileId={file.loanFileId} />}
+
+      {/* Conversational 1003 (flag-gated). The link is unconditional rather than shown only once
+          an application exists: the review page is also where the team sees that one has not been
+          started, and hiding it would make "nothing here yet" indistinguishable from "no link". */}
+      {conversational1003Enabled() && (
+        <Link to={`/portal/file/${file.loanFileId}/application`} className="card linkcard">
+          <div className="spread">
+            <div>
+              <h2 className="mb0">Application (1003)</h2>
+              <p className="mb0 muted">What the borrower has answered, what is still open, and what needs your correction.</p>
+            </div>
+            <span className="btn btn-sm">Review →</span>
+          </div>
+        </Link>
+      )}
 
       <div className="card">
         <div className="card-head"><h2>Documents</h2>{pending.length > 0 && <span className="chip amber">{pending.length} to review</span>}</div>
