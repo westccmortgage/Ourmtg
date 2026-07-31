@@ -21,6 +21,7 @@ import NewLoanFile from './pages/NewLoanFile'
 import ApplicationAssistant from './features/conversational-1003/pages/ApplicationAssistant'
 import ApplicationTeamReview from './features/conversational-1003/pages/ApplicationTeamReview'
 import ShortLink1003 from './pages/ShortLink1003'
+import ApplicationEntry from './pages/ApplicationEntry'
 import { conversational1003Enabled } from './features/conversational-1003/clientFlag'
 
 function NotFound() {
@@ -64,6 +65,10 @@ export default function App() {
                 {/* Short form of an application invite — texted, not clicked from an email.
                     Public by design: it only rewrites the URL, redemption still authorizes. */}
                 <Route path="1003/:token" element={<ShortLink1003 />} />
+                {/* Where 1003.ourmtg.com lands: resolve "my application" from who is signed in.
+                    Not wrapped in RequireAuth — it sends people to sign in itself, so it can
+                    come back here afterwards instead of dropping them on the portal. */}
+                <Route path="application" element={<ApplicationEntry />} />
               </>
             )}
             <Route path="*" element={<NotFound />} />
