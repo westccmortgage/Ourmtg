@@ -10,6 +10,7 @@ import { STAGE_LABEL, STAGE_STEPS } from '../lib/pipeline'
 import { Alert, Empty } from '../components/ui'
 import { flag } from '../domain/flags'
 import { filesChangedSince, blockerSummary, filesNeedingBorrowerAction } from '../lib/loanTeamOps'
+import SendAssistant from '../components/SendAssistant'
 
 export default function LODashboard({ files }) {
   const navigate = useNavigate()
@@ -37,6 +38,10 @@ export default function LODashboard({ files }) {
         </div>
         <Link to="/portal/new-file" className="btn btn-primary btn-sm">+ New loan file</Link>
       </div>
+
+      {/* First card on the page on purpose: this is the one thing that has to be reachable
+          without navigating, because it gets used mid-phone-call. */}
+      <SendAssistant />
 
       <div className="card workspace-summary" id="review">
         <div className="metrics">

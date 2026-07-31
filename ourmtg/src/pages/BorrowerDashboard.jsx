@@ -16,6 +16,7 @@ import CashToClosePanel from '../components/CashToClosePanel'
 import ThirdPartyPanel from '../components/ThirdPartyPanel'
 import TeamContactCard from '../components/TeamContactCard'
 import { BorrowerStatementIncome } from '../components/StatementIncomePanel'
+import { conversational1003Enabled } from '../features/conversational-1003/clientFlag'
 
 export default function BorrowerDashboard({ grants }) {
   const [active, setActive] = useState(grants[0]?.loan_file_id || null)
@@ -103,6 +104,20 @@ export default function BorrowerDashboard({ grants }) {
             ))}
           </span>
         </div>
+      )}
+
+      {/* The application sits above Documents deliberately: the interview is what produces the
+          document requests, so a borrower who does it first gets a shorter checklist. */}
+      {conversational1003Enabled() && (
+        <Link to={`/application/assistant/${active}`} className="card linkcard">
+          <div className="spread">
+            <div>
+              <h2 className="mb0">Your application</h2>
+              <p className="mb0 muted">Answer in your own words — no forms to decode.</p>
+            </div>
+            <span className="btn btn-primary btn-sm">Start →</span>
+          </div>
+        </Link>
       )}
 
       <Link to={`/portal/documents/${active}`} className="card linkcard">

@@ -35,6 +35,11 @@ jobs:
       - name: Security & authorization tests (Phase 1A)
         run: npm run test:security
 
+      # src/lib/ holds pure helpers that decide routing from untrusted URL input. CI runs named
+      # scripts rather than `npm test`, so a new directory is invisible here until it gets a step.
+      - name: Shared client helper tests
+        run: npm run test:lib
+
       # Conversational 1003 lives outside tests/ and src/domain/, so it needs its own step —
       # without this the catalog, rules, and the 20 borrower scenarios go unverified in CI.
       - name: Conversational 1003 engine & scenario tests

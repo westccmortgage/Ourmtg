@@ -5,11 +5,13 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { acceptInvite } from '../lib/api'
+import { landingPath, inviteHref } from '../lib/inviteDestination'
 import { Alert, Spinner } from '../components/ui'
 
 export default function Invite() {
   const [params] = useSearchParams()
   const token = params.get('token') || ''
+  const go = params.get('go') || ''
   const { user, loading } = useAuth()
   const navigate = useNavigate()
   const [state, setState] = useState('working') // working | error
@@ -20,16 +22,20 @@ export default function Invite() {
     if (loading || !user || ran.current || !token) return
     ran.current = true
     acceptInvite(token)
-      .then((r) => navigate('/portal', { replace: true, state: { justJoined: r?.role } }))
+      .then((r) => {
+        navigate(landingPath(go, r?.loanFileId), { replace: true, state: { justJoined: r?.role } })
+      })
       .catch((err) => { setError(err?.message || 'This invite could not be accepted.'); setState('error') })
-  }, [loading, user, token, navigate])
+  }, [loading, user, token, go, navigate])
 
   if (!token) {
     return <Alert kind="error">This link is missing its invite token. Please use the exact link from your email.</Alert>
   }
   if (loading) return <Spinner />
   // Not signed in yet → send to login, then return here to finish accepting.
-  if (!user) return <Navigate to="/login" state={{ from: `/invite?token=${encodeURIComponent(token)}` }} replace />
+  // The destination has to survive the sign-in round trip, or every emailed application link
+  // would quietly degrade into a plain portal link for anyone not already signed in.
+  if (!user) return <Navigate to="/login" state={{ from: inviteHref(token, go) }} replace />
 
   if (state === 'error') {
     return (
