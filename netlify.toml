@@ -28,13 +28,17 @@
 # portal-invite-create falls back to — so an unconfigured DNS record cannot break invites.
 # MUST stay above the SPA catch-all: Netlify applies the first matching rule.
 #
-# The bare host is listed FIRST: the splat below also matches "/" with an empty splat, which
-# would land on /1003/ — a route with no token, i.e. a 404 for someone who just typed the
-# domain out of curiosity. First match wins, so this one has to come before it.
+# The bare host means "take me to my application", so it lands on /application, which works the
+# loan file out from who is signed in. It is listed FIRST: the splat below also matches "/" with
+# an empty splat, which would land on /1003/ — a route with no token, i.e. a 404. First match
+# wins, so this has to come before it.
+#
+# 302, not 301: the destination is a dispatcher whose answer depends on who is asking, and a
+# permanent redirect would be cached by the browser past the point where that stops being true.
 [[redirects]]
   from = "https://1003.ourmtg.com/"
-  to = "https://ourmtg.com/"
-  status = 301
+  to = "https://ourmtg.com/application"
+  status = 302
   force = true
 
 [[redirects]]

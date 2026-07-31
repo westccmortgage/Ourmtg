@@ -3,7 +3,9 @@
 // a route.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { landingPath, inviteHref, isInviteToken, isInviteDestination } from './inviteDestination.js'
+import {
+  landingPath, inviteHref, isInviteToken, isInviteDestination, resolveMyApplication,
+} from './inviteDestination.js'
 
 const FILE = '8f3a1c2e-1111-2222-3333-444455556666'
 const TOKEN = 'a1b2c3d4e5f60718293a4b5c6d7e8f90'
@@ -55,5 +57,38 @@ test('short-link tokens must be exactly what we mint', () => {
   assert.ok(!isInviteToken(`${TOKEN}0`))
   for (const bad of ['', null, undefined, 'not-a-token', `${TOKEN.slice(0, 31)}z`, `../${TOKEN}`]) {
     assert.ok(!isInviteToken(bad), `expected rejection for ${JSON.stringify(bad)}`)
+  }
+})
+
+// ── "my application", resolved from portal_access grants ─────────────────────
+const grant = (visibility, loan_file_id) => ({ visibility, loan_file_id })
+
+test('one borrower grant goes straight in', () => {
+  assert.deepEqual(resolveMyApplication([grant('borrower', FILE)]), { kind: 'one', loanFileId: FILE })
+  assert.deepEqual(resolveMyApplication([grant('coborrower', FILE)]), { kind: 'one', loanFileId: FILE })
+})
+
+test('a loan officer has no application of their own', () => {
+  // Internal users hold grants too. Sending them into someone else's interview would be wrong,
+  // and the endpoint would refuse them anyway — they are not borrower or coborrower on it.
+  const r = resolveMyApplication([grant('owner', FILE), grant('realtor', 'other'), grant('escrow', 'x')])
+  assert.deepEqual(r, { kind: 'none' })
+})
+
+test('several borrower files ask instead of guessing', () => {
+  const r = resolveMyApplication([grant('borrower', FILE), grant('coborrower', 'second-file')])
+  assert.equal(r.kind, 'choose')
+  assert.equal(r.files.length, 2)
+})
+
+test('partner roles never count toward the choice', () => {
+  const r = resolveMyApplication([grant('borrower', FILE), grant('realtor', 'r1'), grant('title', 't1')])
+  assert.deepEqual(r, { kind: 'one', loanFileId: FILE })
+})
+
+test('junk grants cannot produce a route', () => {
+  // A grant row missing its file id must not become /application/assistant/undefined.
+  for (const g of [[], null, undefined, [null], [grant('borrower', null)], [grant('borrower', undefined)], [{}]]) {
+    assert.deepEqual(resolveMyApplication(g), { kind: 'none' }, `expected none for ${JSON.stringify(g)}`)
   }
 })

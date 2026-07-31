@@ -35,6 +35,24 @@ export function inviteHref(token, go) {
   return isInviteDestination(go) ? `${base}&go=${go}` : base
 }
 
+/**
+ * Which loan file "my application" means, given this user's portal_access grants.
+ *
+ * Only the borrower side counts. A loan officer has grants too — theirs say `owner` — but they
+ * have no application of their own to fill out, so for them the answer is "none" rather than
+ * somebody else's file.
+ *
+ * @returns {{kind:'one', loanFileId:string} | {kind:'choose', files:Array} | {kind:'none'}}
+ */
+export function resolveMyApplication(grants) {
+  const mine = (Array.isArray(grants) ? grants : [])
+    .filter((g) => g && (g.visibility === 'borrower' || g.visibility === 'coborrower'))
+    .filter((g) => g.loan_file_id)
+  if (mine.length === 0) return { kind: 'none' }
+  if (mine.length === 1) return { kind: 'one', loanFileId: mine[0].loan_file_id }
+  return { kind: 'choose', files: mine }
+}
+
 // Invite tokens are randomToken(16) server-side: 32 hex characters. Anything else never came
 // from a link we minted — most often a text message that clipped the tail — so it is rejected
 // before redemption rather than sent onward to fail there.
