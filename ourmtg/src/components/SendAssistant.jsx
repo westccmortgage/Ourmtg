@@ -134,9 +134,15 @@ export default function SendAssistant() {
             </button>
           </div>
 
+          {/* Said plainly because the obvious next move — click your own link to see what they
+              will see — cannot work, and fails with an error that reads like a broken link. */}
           <p className="hint" style={{ marginTop: 12 }}>
-            The link is tied to {result.isEmail ? 'that email address' : 'the person you send it to'} and expires.
-            Opening it takes them straight into the application.
+            <b>This link is not for you.</b>{' '}
+            {result.isEmail
+              ? <>It only opens for <b>{result.contact}</b>. Opening it while signed in as yourself will be refused.</>
+              : <>It opens for whoever redeems it first, so send it only to {result.name}.</>}
+            {' '}You own this file, so you are its loan team and can never be its borrower — to
+            walk through the borrower’s side, sign out and sign in with a different address.
           </p>
         </>
       )}

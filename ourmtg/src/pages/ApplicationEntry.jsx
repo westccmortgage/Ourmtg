@@ -13,7 +13,8 @@
 import { Link, Navigate } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { useRole } from '../lib/useRole'
-import { resolveMyApplication } from '../lib/inviteDestination'
+import { resolveMyApplication, inviteHref } from '../lib/inviteDestination'
+import { pendingInvite } from '../lib/pendingInvite'
 import { Alert, Spinner } from '../components/ui'
 
 export default function ApplicationEntry() {
@@ -26,6 +27,13 @@ export default function ApplicationEntry() {
   if (!user) return <Navigate to="/login" state={{ from: '/application' }} replace />
   if (loading) return <Spinner />
   if (error) return <Alert kind="error">{error}</Alert>
+
+  // Same rescue as the portal: an invite parked before sign-in beats telling someone they have
+  // no application. They were sent here precisely because they do.
+  const parked = pendingInvite()
+  if (parked && resolveMyApplication(grants).kind === 'none') {
+    return <Navigate to={inviteHref(parked.token, parked.go || 'application')} replace />
+  }
 
   const target = resolveMyApplication(grants)
 
