@@ -45,5 +45,10 @@ jobs:
       - name: Conversational 1003 engine & scenario tests
         run: npm run test:c1003
 
+      # Completeness is deterministic and must stay that way — a file reported complete while a
+      # statement month is missing is what stops the processor from looking.
+      - name: Pre-underwriting document rules
+        run: npm run test:pu
+
       - name: Build the SPA
         run: npm run build
