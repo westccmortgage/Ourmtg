@@ -45,7 +45,8 @@ for f in \
   "${ROOT}/supabase/baseline/001_ourmtg_core.sql" \
   "${ROOT}/supabase/delta/001_live_core_hardening.sql" \
   "${ROOT}/supabase/delta/002_statement_income_analysis.sql" \
-  "${ROOT}/supabase/delta/003_conversational_1003.sql"
+  "${ROOT}/supabase/delta/003_conversational_1003.sql" \
+  "${ROOT}/supabase/delta/004_protect_loan_files.sql"
 do
   name="$(basename "$f")"
   if psql -v ON_ERROR_STOP=1 -q "$DB" -f "$f" >/dev/null 2>/tmp/rehearsal_err; then
@@ -137,6 +138,15 @@ rejects "secure last_four must be exactly four digits" \
 rejects "turn processing_state is a closed vocabulary" \
   "insert into application_turns (application_id,loan_file_id,idempotency_key,request_hash,processing_state)
    values ('${APP}','${LF}','key-2','h','not_a_state');" "violates check constraint"
+
+# The failure delta 004 exists to prevent: on 2026-08-02 every loan file in the live project was
+# destroyed by deleting the auth users who owned them, not by any DELETE against loan_files.
+echo "== ownership protection (delta 004) =="
+OWNER="$(scalar "select owner_user_id from loan_files where id='${LF}';")"
+rejects "deleting a user who owns loan files is refused" \
+  "delete from auth.users where id='${OWNER}';" "violates foreign key constraint"
+STILL="$(scalar "select count(*) from loan_files where id='${LF}';")"
+[ "$STILL" = "1" ] && ok "the loan file survived the attempt" || bad "loan file vanished: $STILL"
 
 echo "== cascade =="
 psql -q "$DB" -c "delete from loan_files where id='${LF}';" >/dev/null
