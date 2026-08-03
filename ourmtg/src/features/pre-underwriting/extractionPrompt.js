@@ -79,6 +79,18 @@ export function buildExtractionInstruction(opts = {}) {
   lines.push('FORMATS. Dates as YYYY-MM-DD. Months as YYYY-MM. Amounts as plain numbers without')
   lines.push('currency symbols or thousands separators. Account numbers as the last four digits only.')
 
+  // The credit report is the only document with a list, and the only one with a look-alike that
+  // arrives constantly and cannot be used for qualification. Both need saying explicitly.
+  lines.push('')
+  lines.push('CREDIT REPORTS, and only credit reports, also return `tradelines`: one entry per')
+  lines.push('account, with creditorName, monthlyPayment, balance, accountLast4, accountType,')
+  lines.push('status, and a confidence for each. Never return tradelines for any other document.')
+  lines.push('Set isConsumerReport to true when the document is a consumer credit-app or')
+  lines.push('educational score printout — Credit Karma, an Experian or bureau consumer portal, a')
+  lines.push('bank app credit widget — rather than a merged report pulled from the three')
+  lines.push('repositories for a mortgage. They look similar and are not interchangeable, so')
+  lines.push('report which one it is and let the rules decide what that means.')
+
   if (opts.expectedDocKey) {
     lines.push('')
     lines.push(`CONTEXT: this was uploaded against the checklist item "${opts.expectedDocKey}". That is`)

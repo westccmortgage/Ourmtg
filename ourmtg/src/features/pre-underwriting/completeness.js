@@ -172,6 +172,37 @@ export function assessCompleteness(docKey, parts, opts = {}) {
     gaps.push({ code: 'unreadable_tax_year', message: 'We couldn’t read which tax year this covers — please send the most recent bill.' })
   }
 
+  // ── Credit ───────────────────────────────────────────────────────────────
+  // A single-bureau report is not a tri-merge, and the middle score cannot be determined from
+  // it. Reporting the file complete on one bureau would send it to underwriting to be returned.
+  if (Number.isFinite(rules.bureaus)) {
+    const seen = new Set()
+    for (const it of items) {
+      for (const b of asList(it.bureausIncluded)) seen.add(String(b).toLowerCase().replace(/[^a-z]/g, ''))
+      // Fall back to the scores themselves — a report that lists three scores has three bureaus
+      // whether or not it also prints a summary line naming them.
+      if (it.equifaxScore != null) seen.add('equifax')
+      if (it.experianScore != null) seen.add('experian')
+      if (it.transUnionScore != null) seen.add('transunion')
+    }
+    if (seen.size < rules.bureaus) {
+      gaps.push({
+        code: 'not_tri_merge',
+        message: `This report covers ${seen.size} of ${rules.bureaus} bureaus — a merged report from all three is needed.`,
+      })
+    }
+  }
+
+  // The substitute that arrives constantly and cannot be used: a consumer credit app. It is a
+  // soft-pull educational score, not a repository-merged mortgage report, and accepting one
+  // would put a number into qualification that no lender will honor.
+  if (rules.mortgageGrade && items.some((i) => i.isConsumerReport === true)) {
+    gaps.push({
+      code: 'consumer_report',
+      message: 'This is a consumer credit app report. Mortgage qualification needs a merged report pulled from the three repositories.',
+    })
+  }
+
   // ── Signatures ───────────────────────────────────────────────────────────
   if (rules.signedByAllParties) {
     const anyUnsigned = items.some((i) => i.signedByAllParties === false)
@@ -184,11 +215,16 @@ export function assessCompleteness(docKey, parts, opts = {}) {
 }
 
 /**
- * Everything still needed across a file, in the borrower's terms.
+ * Everything still needed across a file.
  *
  * @param {Array<{docKey: string, required?: boolean}>} checklist  what this loan needs
  * @param {Record<string, Array<object>>} byType  classified uploads keyed by docKey
- * @returns {Array<{docKey, label, complete, gaps}>} ordered as the checklist is
+ * @param {{asOf?: number, providedBy?: 'borrower'|'loan_team'}} [opts]
+ *   `providedBy` filters to what that side can actually produce. Without it you get the whole
+ *   list, which is right for a processor and wrong for a borrower: a credit report is required,
+ *   missing, and impossible for them to send, so putting it on their list is asking someone to
+ *   do something they cannot do and then waiting on them for it.
+ * @returns {Array<{docKey, label, complete, gaps, providedBy}>} ordered as the checklist is
  */
 export function missingForFile(checklist, byType, opts = {}) {
   return (Array.isArray(checklist) ? checklist : [])
@@ -196,8 +232,10 @@ export function missingForFile(checklist, byType, opts = {}) {
       const docKey = item?.docKey || item?.doc_key
       const type = getDocumentType(docKey)
       if (!type) return null
+      const by = type.providedBy || 'borrower'
+      if (opts.providedBy && by !== opts.providedBy) return null
       const { complete, gaps } = assessCompleteness(docKey, byType?.[docKey] || [], opts)
-      return { docKey, label: type.label, complete, gaps }
+      return { docKey, label: type.label, complete, gaps, providedBy: by }
     })
     .filter((r) => r && !r.complete)
 }
@@ -219,6 +257,14 @@ export function documentReadiness(checklist, byType, opts = {}) {
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────
+
+// bureausIncluded arrives as an array from a structured read, or as "Equifax, Experian,
+// TransUnion" from a line of text. Both are the same fact.
+const asList = (v) => {
+  if (Array.isArray(v)) return v.filter(Boolean)
+  if (typeof v === 'string') return v.split(/[,/;&]|\band\b/i).map((s) => s.trim()).filter(Boolean)
+  return []
+}
 
 function mergeSpans(sorted) {
   const out = [{ ...sorted[0] }]
