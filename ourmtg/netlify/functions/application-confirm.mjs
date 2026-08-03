@@ -1,4 +1,4 @@
-// POST /.netlify/functions/application-confirm   (borrower-authed, Bearer JWT)
+// POST /.netlify/functions/application-confirm   (borrower- or team-authed, Bearer JWT)
 //
 // The "Correct / Change it / I'm not sure" action (§14), plus contradiction resolution (§28.14)
 // and permitted refusals (§28.11). Deliberately separate from application-turn: confirming a
@@ -9,14 +9,14 @@
 
 import { admin, isConfigured } from './_lib/supabase.mjs'
 import {
-  authUser, json, preflight, loadLoanFile, resolveAccess, logAccess,
+  authUser, json, preflight, loadLoanFile, resolveAccess, isInternal, logAccess,
 } from './_lib/portal.mjs'
 import { readJsonBody, isUuid, isEnum, boundedString } from './_lib/requestGuard.mjs'
 import { isValidIdempotencyKey, requestHash } from './_lib/idempotency.mjs'
 import { conversational1003Enabled } from './_lib/conversational1003.mjs'
 import {
-  ensureApplication, ensureParty, listParties, loadState, persistEvents, syncProjection,
-  claimTurn, updateTurn, updateApplication, saveAskedHistory, currentMonth, newId,
+  ensureApplication, ensureParty, ensurePartyByIndex, listParties, loadState, persistEvents,
+  syncProjection, claimTurn, updateTurn, updateApplication, saveAskedHistory, currentMonth, newId,
 } from './_lib/applicationRepo.mjs'
 import {
   confirmValue, resolveConflict, declineField, flagClarification,
@@ -27,6 +27,7 @@ import { buildReview } from '../../src/features/conversational-1003/review.js'
 import { isKnownField } from '../../src/features/conversational-1003/applicationCatalog.js'
 
 const ACTIONS = ['confirm', 'resolve_conflict', 'decline', 'unsure']
+const TAKEN_VIA = ['phone', 'in_person', 'video']
 
 export default async (req) => {
   if (req.method === 'OPTIONS') return preflight()
@@ -65,8 +66,21 @@ export default async (req) => {
     return json({ ok: false, error: 'Database error' }, 500)
   }
   if (!loanFile) return json({ ok: false, error: 'Loan file not found' }, 404)
-  if (!access || !['borrower', 'coborrower'].includes(access.visibility)) {
+
+  // Same two callers as application-turn: the borrower, or the loan team taking the application
+  // on their behalf. Splitting these two endpoints on authorization would give a team member an
+  // interview whose confirmation buttons all fail.
+  const borrowerSide = Boolean(access) && ['borrower', 'coborrower'].includes(access.visibility)
+  const teamSide = isInternal(access)
+  if (!borrowerSide && !teamSide) {
     return json({ ok: false, error: 'Not authorized for this loan file' }, 403)
+  }
+  let assistPartyIndex = null
+  if (!borrowerSide) {
+    assistPartyIndex = body.assistParty === 1 ? 1 : (body.assistParty === 0 ? 0 : null)
+    if (assistPartyIndex === null) {
+      return json({ ok: false, error: 'Say whether you are entering this for the borrower or the co-borrower.' }, 400)
+    }
   }
 
   try {
@@ -74,9 +88,11 @@ export default async (req) => {
     if (['borrower_attested', 'accepted_into_loan_file'].includes(application.status)) {
       return json({ ok: false, error: 'This application has been submitted for review.' }, 409)
     }
-    const party = await ensureParty(svc, {
-      application, loanFile, userId: auth.user.id, visibility: access.visibility, locale,
-    })
+    const party = borrowerSide
+      ? await ensureParty(svc, {
+        application, loanFile, userId: auth.user.id, visibility: access.visibility, locale,
+      })
+      : await ensurePartyByIndex(svc, { application, loanFile, partyIndex: assistPartyIndex, locale })
     const parties = await listParties(svc, application.id)
     const partyCount = Math.max(1, parties.length)
 
@@ -88,6 +104,8 @@ export default async (req) => {
       fields: {
         direction: 'in', input_mode: 'control', locale, intent: action,
         asked_field_path: boundedString(paths[0], 200),
+        taken_by: borrowerSide ? null : auth.user.id,
+        taken_via: borrowerSide ? null : (isEnum(body.takenVia, TAKEN_VIA) ? body.takenVia : null),
       },
     })
     if (claim.conflict) return json({ ok: false, error: 'That key was already used for a different action.' }, 409)
@@ -113,7 +131,7 @@ export default async (req) => {
     for (const path of paths) {
       let r
       if (action === 'confirm') {
-        r = confirmValue(state, { path, at, eventId: newId(), actor: auth.user.id })
+        r = confirmValue(state, { path, at, eventId: newId(), actor: auth.user.id, byTeam: !borrowerSide })
       } else if (action === 'resolve_conflict') {
         r = resolveConflict(state, {
           path, chosenValue: body.chosenValue, at, eventId: newId(), actor: auth.user.id,
@@ -125,7 +143,12 @@ export default async (req) => {
         if (!r.event) askedHistory = noteSkipped(askedHistory, `field:${path}`, { at })
       } else {
         // 'unsure' — keep the value, flag it for a targeted follow-up rather than accepting it.
-        r = flagClarification(state, { path, reason: 'borrower_unsure', at, eventId: newId() })
+        // Who was unsure matters: "the borrower was unsure" and "the person taking it down was
+        // unsure" are different follow-ups, and recording the first when the second happened
+        // would send someone back to the borrower over a transcription doubt.
+        r = flagClarification(state, {
+          path, reason: borrowerSide ? 'borrower_unsure' : 'taken_by_team_unsure', at, eventId: newId(),
+        })
       }
       if (r.state) state = r.state
       results.push({ path, outcome: r.outcome, reason: r.reason || null })
@@ -146,7 +169,8 @@ export default async (req) => {
       status: report.status, percent_complete: report.percent,
     })
     await logAccess(svc, {
-      portalUser: auth.user.id, loanFileId: loanFile.id, action: 'application_confirm', target: action, req,
+      portalUser: auth.user.id, loanFileId: loanFile.id,
+      action: borrowerSide ? 'application_confirm' : 'application_confirm_assisted', target: action, req,
     })
 
     return json({
@@ -155,7 +179,8 @@ export default async (req) => {
       nextQuestion: planNextQuestion(state, { asOfMonth, locale, askedHistory }),
       review: buildReview(state, report, { locale }),
       progress: progressOf(report),
-      canAttest: report.everythingResolved,
+      // A team member is never offered attestation, however complete the application looks.
+      canAttest: borrowerSide && report.everythingResolved,
     })
   } catch (e) {
     console.error('[application-confirm]', e?.message || e)

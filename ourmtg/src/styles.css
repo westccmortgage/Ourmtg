@@ -394,6 +394,18 @@ input[type=range] { accent-color: var(--ink); padding: 0; border: 0; background:
 .c1003 { padding-bottom: 96px; }
 .c1003-head h1 { margin: 8px 0 4px; }
 .c1003-progress { margin: 12px 0; }
+
+/* Assist mode. Deliberately loud and always in view: a loan officer who forgets whose
+   application they are typing into is how a file gets misattributed in good faith. */
+.c1003-assist-banner {
+  margin: 10px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--ink, #1b1b1b);
+  border-left-width: 4px;
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 1.45;
+}
 .c1003-bar { height: 6px; background: rgba(0,0,0,.08); border-radius: 999px; overflow: hidden; }
 .c1003-bar span { display: block; height: 100%; background: currentColor; transition: width .3s ease; }
 .c1003-langs { display: flex; gap: 4px; margin: 8px 0; }

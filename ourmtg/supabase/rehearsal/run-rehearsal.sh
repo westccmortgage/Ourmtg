@@ -46,7 +46,8 @@ for f in \
   "${ROOT}/supabase/delta/001_live_core_hardening.sql" \
   "${ROOT}/supabase/delta/002_statement_income_analysis.sql" \
   "${ROOT}/supabase/delta/003_conversational_1003.sql" \
-  "${ROOT}/supabase/delta/004_protect_loan_files.sql"
+  "${ROOT}/supabase/delta/004_protect_loan_files.sql" \
+  "${ROOT}/supabase/delta/005_team_assisted_application.sql"
 do
   name="$(basename "$f")"
   if psql -v ON_ERROR_STOP=1 -q "$DB" -f "$f" >/dev/null 2>/tmp/rehearsal_err; then
@@ -147,6 +148,24 @@ rejects "deleting a user who owns loan files is refused" \
   "delete from auth.users where id='${OWNER}';" "violates foreign key constraint"
 STILL="$(scalar "select count(*) from loan_files where id='${LF}';")"
 [ "$STILL" = "1" ] && ok "the loan file survived the attempt" || bad "loan file vanished: $STILL"
+
+# Delta 005 — a turn taken by the loan team must be distinguishable from one the borrower typed.
+echo "== team-taken turns (delta 005) =="
+rejects "taken_via is a closed vocabulary" \
+  "insert into application_turns (application_id,loan_file_id,idempotency_key,request_hash,taken_via)
+   values ('${APP}','${LF}','key-taken-1','h','carrier_pigeon');" "violates check constraint"
+psql -q "$DB" -c "insert into application_turns (application_id,loan_file_id,idempotency_key,request_hash,taken_by,taken_via)
+   values ('${APP}','${LF}','key-taken-2','h','${LO}','phone');" >/dev/null 2>&1
+TAKEN="$(scalar "select count(*) from application_turns where taken_by='${LO}' and taken_via='phone';")"
+[ "$TAKEN" = "1" ] && ok "a phone-taken turn records who took it" || bad "team-taken turn not stored: $TAKEN"
+SELF="$(scalar "select count(*) from application_turns where idempotency_key='key-1' and taken_by is null;")"
+[ "$SELF" = "1" ] && ok "an existing turn still reads as answered by the party themselves" \
+  || bad "pre-existing rows changed meaning: $SELF"
+# Re-running must not stack a second copy of the check constraint.
+psql -v ON_ERROR_STOP=1 -q "$DB" -f "${ROOT}/supabase/delta/005_team_assisted_application.sql" >/dev/null 2>&1 \
+  && ok "005 is safe to re-run" || bad "005 is not idempotent"
+CHK="$(scalar "select count(*) from pg_constraint where conrelid='public.application_turns'::regclass and conname='application_turns_taken_via_check';")"
+[ "$CHK" = "1" ] && ok "re-running left exactly one check constraint" || bad "constraints stacked: $CHK"
 
 echo "== cascade =="
 psql -q "$DB" -c "delete from loan_files where id='${LF}';" >/dev/null

@@ -6,6 +6,21 @@
 //
 // Everything shown here comes from the server: the next question, progress, and completeness
 // are computed by the deterministic engine, not by this component.
+//
+// ── assist mode ─────────────────────────────────────────────────────────────
+// The same screen, driven by the loan team with the borrower on the phone. It is the identical
+// interview because it must be: two question orders would be two applications. What changes is
+// only what is true about who is answering —
+//
+//   • the answers are recorded as `team_entry`, not as the borrower's own words
+//   • the header never stops saying whose application this is
+//   • SSNs and account numbers are not offered: a value that exists to never travel through a
+//     chat box does not become safe because a loan officer is the one typing it
+//   • attestation is absent, not disabled — the borrower signs, and they sign after this
+//
+// The wording throughout addresses the person taking the application, not the borrower. A
+// screen that says "your income" to someone entering somebody else's is how a file gets
+// misattributed by an honest person in a hurry.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
@@ -44,7 +59,7 @@ const COPY = {
 }
 const t = (k, locale) => COPY[k][locale] || COPY[k].en
 
-export default function ApplicationAssistant() {
+export default function ApplicationAssistant({ assist = false }) {
   const { loanFileId } = useParams()
   const { user } = useAuth()
   // Reuse the app's existing language switcher (it already lives in the site header) rather
@@ -57,14 +72,22 @@ export default function ApplicationAssistant() {
   const [error, setError] = useState('')
   const [showReview, setShowReview] = useState(false)
   const [secureError, setSecureError] = useState('')
+  // Assist mode does not begin until both are answered. Neither is inferable and a wrong guess
+  // writes a false record, so the interview does not start on a default.
+  const [assistParty, setAssistParty] = useState(null)
+  const [takenVia, setTakenVia] = useState(null)
   const bottomRef = useRef(null)
+
+  const assisting = assist && assistParty !== null && takenVia !== null
+  // Passed on every write. Undefined for a borrower, who can only be answering for themselves.
+  const onBehalf = assisting ? { assistParty, takenVia } : {}
 
   // One key per pending submission, held across retries so a resend can never double-write.
   const pendingKey = useRef(null)
 
   const load = useCallback(async () => {
     try {
-      const s = await getSession(loanFileId, locale)
+      const s = await getSession(loanFileId, locale, assisting ? assistParty : null)
       setSession(s)
       if (s.nextQuestion) {
         setThread((prev) => (prev.length ? prev : [{ role: 'assistant', question: s.nextQuestion }]))
@@ -72,9 +95,9 @@ export default function ApplicationAssistant() {
     } catch (e) {
       setError(e.message || 'Could not load your application.')
     }
-  }, [loanFileId, locale])
+  }, [loanFileId, locale, assisting, assistParty])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { if (!assist || assisting) load() }, [load, assist, assisting])
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [thread.length])
 
   const question = session?.nextQuestion || null
@@ -94,6 +117,7 @@ export default function ApplicationAssistant() {
         loanFileId, text: body, intent, locale, inputMode,
         askedQuestionId: question?.id, askedFieldPath: question?.fieldPath,
         idempotencyKey: pendingKey.current,
+        ...onBehalf,
       })
       pendingKey.current = null
 
@@ -126,6 +150,7 @@ export default function ApplicationAssistant() {
       const res = await confirmValues({
         loanFileId, action, paths, chosenValue, locale,
         idempotencyKey: newIdempotencyKey(action),
+        ...onBehalf,
       })
       setThread((p) => [...p, { role: 'assistant', question: res.nextQuestion }])
       setSession((s) => ({
@@ -154,15 +179,35 @@ export default function ApplicationAssistant() {
   }
 
   if (!user) return <Alert kind="error">Please sign in to continue your application.</Alert>
+  if (assist && !assisting) {
+    return (
+      <AssistGate
+        loanFileId={loanFileId}
+        onStart={(party, via) => { setAssistParty(party); setTakenVia(via) }}
+      />
+    )
+  }
   if (!session && !error) return <p className="muted">{t('loading', locale)}</p>
 
   const progress = session?.progress
   return (
     <div className="c1003" style={{ maxWidth: 680, margin: '0 auto' }}>
       <header className="c1003-head">
-        <Link to="/portal" className="backlink">← {locale === 'es' ? 'Portal' : locale === 'ru' ? 'Портал' : 'Back to portal'}</Link>
-        <h1>{t('title', locale)}</h1>
-        <p className="muted">{t('intro', locale)}</p>
+        {assisting ? (
+          <Link to={`/portal/file/${loanFileId}/application`} className="backlink">← Back to the file</Link>
+        ) : (
+          <Link to="/portal" className="backlink">← {locale === 'es' ? 'Portal' : locale === 'ru' ? 'Портал' : 'Back to portal'}</Link>
+        )}
+        <h1>{assisting ? 'Taking the application' : t('title', locale)}</h1>
+        {assisting ? (
+          <AssistBanner
+            session={session}
+            takenVia={takenVia}
+            partyIndex={assistParty}
+          />
+        ) : (
+          <p className="muted">{t('intro', locale)}</p>
+        )}
 
         {progress && (
           <div className="c1003-progress">
@@ -197,7 +242,19 @@ export default function ApplicationAssistant() {
         onResolveConflict={(value) => confirm('resolve_conflict', [question.fieldPath], value)}
       />}
 
-      {question?.secureEntry ? (
+      {question?.secureEntry && assisting ? (
+        <div className="card">
+          <p style={{ marginTop: 0 }}>
+            <b>This one only {borrowerLabel(session)} can enter.</b> A Social Security or account
+            number is never typed into a conversation — it goes into a separate secure control on
+            their own screen, and reading it to you over the phone would defeat that.
+          </p>
+          <button type="button" className="btn btn-primary btn-sm" disabled={busy}
+            onClick={() => submit('', { intent: 'skip_for_now' })}>
+            Skip this — they’ll enter it
+          </button>
+        </div>
+      ) : question?.secureEntry ? (
         <SecureFieldInput
           fieldPath={question.fieldPath}
           type={question.dataType === 'ssn' ? 'ssn' : 'account'}
@@ -233,7 +290,9 @@ export default function ApplicationAssistant() {
         </form>
       )}
 
-      {session?.canAttest && (
+      {assisting && session?.progress?.openCount === 0 && <AssistHandoff loanFileId={loanFileId} session={session} />}
+
+      {!assisting && session?.canAttest && (
         <AttestationPanel
           loanFileId={loanFileId}
           locale={locale}
@@ -369,5 +428,91 @@ function ActiveQuestion({ question, locale, busy, onAsk, onChoice, onResolveConf
         ))}
       </div>
     </section>
+  )
+}
+
+// ── assist mode ──────────────────────────────────────────────────────────────
+
+const VIA_LABEL = { phone: 'over the phone', in_person: 'in person', video: 'on a video call' }
+
+const borrowerLabel = (session) => session?.assisting?.borrowerName || 'the borrower'
+
+// Two questions, asked once, before a single answer is recorded. They are not settings — they
+// are the two facts that make every row written afterwards true, and the URLA has a box for the
+// second one.
+function AssistGate({ loanFileId, onStart }) {
+  const [party, setParty] = useState(0)
+  const [via, setVia] = useState('phone')
+  return (
+    <div style={{ maxWidth: 560, margin: '8px auto' }}>
+      <Link to={`/portal/file/${loanFileId}/application`} className="backlink">← Back to the file</Link>
+      <h1 style={{ marginBottom: 6 }}>Take this application</h1>
+      <p className="muted" style={{ marginBottom: 22 }}>
+        The same interview the borrower would get, with you typing what they tell you. Everything
+        you enter is recorded as taken by you — not as their own words — so the file stays honest
+        about where each answer came from.
+      </p>
+
+      <div className="card">
+        <div className="field">
+          <label htmlFor="ag-party">Who are you entering this for?</label>
+          <select id="ag-party" value={party} onChange={(e) => setParty(Number(e.target.value))}>
+            <option value={0}>The borrower</option>
+            <option value={1}>The co-borrower</option>
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="ag-via">How are you taking it?</label>
+          <select id="ag-via" value={via} onChange={(e) => setVia(e.target.value)}>
+            <option value="phone">Over the phone</option>
+            <option value="in_person">In person</option>
+            <option value="video">On a video call</option>
+          </select>
+          <p className="hint">Recorded with the application, the way the 1003 asks for it.</p>
+        </div>
+        <button type="button" className="btn btn-primary" onClick={() => onStart(party, via)}>
+          Start
+        </button>
+      </div>
+
+      <p className="hint" style={{ marginTop: 18 }}>
+        Two things you will not be able to do, by design: enter their Social Security or account
+        numbers, and sign for them. Both are theirs. When you are done, send them the link — they
+        review what you recorded and submit it.
+      </p>
+    </div>
+  )
+}
+
+// Stays on screen for the whole interview. A team member who forgets whose application this is
+// for even one question is how a file ends up misattributed by someone acting in good faith.
+function AssistBanner({ session, takenVia, partyIndex }) {
+  const who = session?.assisting?.borrowerName
+  const role = partyIndex === 1 ? 'co-borrower' : 'borrower'
+  return (
+    <div className="c1003-assist-banner">
+      <p className="mb0">
+        <b>You are entering this for {who ? `${who} (${role})` : `the ${role}`}</b>{' '}
+        {VIA_LABEL[takenVia] || ''}. Answers are saved as recorded by you.
+      </p>
+    </div>
+  )
+}
+
+// The end of a team-taken application is not a submission — it is a handoff. Saying so here
+// stops the obvious wrong conclusion: that filling everything in finished the job.
+function AssistHandoff({ loanFileId, session }) {
+  return (
+    <div className="card">
+      <div className="card-head"><h2>Everything is recorded</h2></div>
+      <p style={{ marginTop: 0 }}>
+        Nothing is submitted yet, and it should not be — {borrowerLabel(session)} has to review
+        what you entered and submit it themselves. Send them their link; they will see the same
+        answers and a plain statement of what they are confirming.
+      </p>
+      <Link to={`/portal/file/${loanFileId}`} className="btn btn-primary btn-sm">
+        Open the file to send their link
+      </Link>
+    </div>
   )
 }

@@ -106,8 +106,15 @@ export default async (req) => {
           intent: t.intent, relevance: t.answer_relevance, misunderstanding: t.misunderstanding,
           state: t.processing_state, askedField: t.asked_field_path,
           safetyFlags: t.safety_flags, provider: t.provider_name, model: t.provider_model,
-          // The borrower's own words, already scrubbed of sensitive values at write time.
+          // Scrubbed of SSNs and account numbers at the endpoint boundary, before the row was
+          // ever written — see application-turn. Until 2026-08 that claim was made here and was
+          // untrue: the turn row is persisted before interpretation runs, so the engine's
+          // redaction came too late to protect it.
           text: t.borrower_text,
+          // Null when the party answered for themselves. Set when the loan team took it down,
+          // so the transcript never reads as the borrower's own typing.
+          takenBy: t.taken_by || null,
+          takenVia: t.taken_via || null,
         })),
       })
     }

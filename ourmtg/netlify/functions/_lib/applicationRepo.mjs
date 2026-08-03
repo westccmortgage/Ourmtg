@@ -71,6 +71,24 @@ export async function ensureParty(svc, { application, loanFile, userId, visibili
 
   const role = visibility === 'coborrower' ? 'coborrower' : 'borrower'
   const partyIndex = role === 'coborrower' ? 1 : 0
+
+  // The loan team may have opened this seat already, by taking the application over the phone
+  // before the borrower ever signed in. That row is theirs — it has their answers on it — so
+  // the borrower claims it rather than colliding with it and getting a stranger's party id.
+  const seat = await unclaimedSeat(svc, application.id, partyIndex)
+  if (seat) {
+    const { data: claimed } = await svc
+      .from('application_parties')
+      .update({ portal_user: userId, ...(locale ? { locale } : {}) })
+      .eq('id', seat.id)
+      .is('portal_user', null)      // lost race ⇒ zero rows, and we fall through to re-read
+      .select('*')
+      .maybeSingle()
+    if (claimed) return claimed
+    const { data: reread } = await svc.from('application_parties').select('*').eq('id', seat.id).maybeSingle()
+    if (reread) return reread
+  }
+
   const insert = {
     application_id: application.id,
     organization_id: loanFile.organization_id || null,
@@ -91,6 +109,57 @@ export async function ensureParty(svc, { application, loanFile, userId, visibili
     throw new Error('party create: ' + iErr.message)
   }
   return data
+}
+
+/**
+ * The party row a team member is answering FOR, created without an account behind it.
+ *
+ * Deliberately never binds portal_user: the loan officer is not becoming the borrower. The seat
+ * stays empty until the real person signs in through their invite and ensureParty claims it,
+ * and everything recorded in the meantime is already attached to the right party.
+ */
+export async function ensurePartyByIndex(svc, { application, loanFile, partyIndex, locale }) {
+  const index = partyIndex === 1 ? 1 : 0
+  const { data: existing, error } = await svc
+    .from('application_parties')
+    .select('*')
+    .eq('application_id', application.id)
+    .eq('party_index', index)
+    .maybeSingle()
+  if (error) throw new Error('party read: ' + error.message)
+  if (existing) return existing
+
+  const insert = {
+    application_id: application.id,
+    organization_id: loanFile.organization_id || null,
+    loan_file_id: loanFile.id,
+    party_index: index,
+    party_role: index === 1 ? 'coborrower' : 'borrower',
+    portal_user: null,
+    locale: locale || null,
+  }
+  const { data, error: iErr } = await svc
+    .from('application_parties').insert(insert).select('*').maybeSingle()
+  if (iErr) {
+    if (iErr.code === '23505') {
+      const { data: raced } = await svc.from('application_parties').select('*')
+        .eq('application_id', application.id).eq('party_index', index).maybeSingle()
+      if (raced) return raced
+    }
+    throw new Error('party create: ' + iErr.message)
+  }
+  return data
+}
+
+async function unclaimedSeat(svc, applicationId, partyIndex) {
+  const { data } = await svc
+    .from('application_parties')
+    .select('*')
+    .eq('application_id', applicationId)
+    .eq('party_index', partyIndex)
+    .is('portal_user', null)
+    .maybeSingle()
+  return data || null
 }
 
 /** All parties on the application (team view and party-count for the engine). */

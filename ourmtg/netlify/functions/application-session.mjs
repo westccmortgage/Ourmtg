@@ -18,7 +18,7 @@ import {
 import { isUuid } from './_lib/requestGuard.mjs'
 import { conversational1003Enabled } from './_lib/conversational1003.mjs'
 import {
-  ensureApplication, ensureParty, listParties, loadState, currentMonth,
+  ensureApplication, ensureParty, ensurePartyByIndex, listParties, loadState, currentMonth,
 } from './_lib/applicationRepo.mjs'
 import { planNextQuestion } from '../../src/features/conversational-1003/questionPlanner.js'
 import { computeCompleteness } from '../../src/features/conversational-1003/completenessEngine.js'
@@ -54,14 +54,25 @@ export default async (req) => {
   const internal = isInternal(access)
   const locale = url.searchParams.get('locale') || 'en'
 
+  // A team member taking the application over the phone needs the same next question the
+  // borrower would get. Opt-in per request rather than implied by being internal: reviewing a
+  // file and conducting an interview are different acts, and the screen has to have chosen one.
+  const assistRaw = url.searchParams.get('assistParty')
+  const assistParty = internal && (assistRaw === '0' || assistRaw === '1') ? Number(assistRaw) : null
+
   try {
     const application = await ensureApplication(svc, {
       loanFile, createdBy: auth.user.id, locale,
     })
-    // Internal viewers read the borrower's application; they do not become a party to it.
-    const party = internal ? null : await ensureParty(svc, {
-      application, loanFile, userId: auth.user.id, visibility: access.visibility, locale,
-    })
+    // Internal viewers read the borrower's application; they do not become a party to it. Taking
+    // it on someone's behalf opens that person's seat — still without an account behind it.
+    const party = !internal
+      ? await ensureParty(svc, {
+        application, loanFile, userId: auth.user.id, visibility: access.visibility, locale,
+      })
+      : (assistParty !== null
+        ? await ensurePartyByIndex(svc, { application, loanFile, partyIndex: assistParty, locale })
+        : null)
     const parties = await listParties(svc, application.id)
     const state = await loadState(svc, {
       application, partyCount: Math.max(1, parties.length),
@@ -71,7 +82,7 @@ export default async (req) => {
     const askedHistory = party?.asked_history || {}
     const attested = application.status === 'borrower_attested' || application.status === 'accepted_into_loan_file'
     const report = computeCompleteness(state, { asOfMonth, attested, teamAccepted: application.status === 'accepted_into_loan_file' })
-    const nextQuestion = internal ? null : planNextQuestion(state, {
+    const nextQuestion = (internal && assistParty === null) ? null : planNextQuestion(state, {
       asOfMonth, locale, askedHistory, attested,
       teamAccepted: application.status === 'accepted_into_loan_file',
     })
@@ -90,6 +101,16 @@ export default async (req) => {
         catalogVersion: application.catalog_version,
       },
       party: party ? { id: party.id, index: party.party_index, role: party.party_role } : null,
+      // Whose application this is, and whether the caller is the one filling it out. The screen
+      // needs both to avoid ever implying a team member is answering about themselves.
+      assisting: assistParty === null ? null : {
+        partyIndex: assistParty,
+        role: assistParty === 1 ? 'coborrower' : 'borrower',
+        borrowerName: loanFile.borrower_name || null,
+        // A team member cannot attest. Said here rather than discovered at the end of an
+        // interview, when the only remaining move would be to start over as someone else.
+        canAttest: false,
+      },
       nextQuestion,
       review: buildReview(state, report, { locale }),
       progress: {
@@ -100,7 +121,10 @@ export default async (req) => {
         meaning: report.meaning,
         notMeaning: report.notMeaning,
       },
-      canAttest: report.everythingResolved && !attested,
+      // Never true for a team member, however complete the application is. Attesting is the
+      // borrower's act; application-attest refuses them regardless, and offering the button
+      // would only produce a 403 at the one moment the work looked finished.
+      canAttest: !internal && report.everythingResolved && !attested,
     })
   } catch (e) {
     console.error('[application-session]', e?.message || e)

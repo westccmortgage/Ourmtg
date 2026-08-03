@@ -1,4 +1,16 @@
-// POST /.netlify/functions/application-turn   (borrower-authed, Bearer JWT)
+// POST /.netlify/functions/application-turn   (borrower- or team-authed, Bearer JWT)
+//
+// One turn of the interview. Usually the borrower's own; optionally taken by the loan team on
+// their behalf, which is how mortgage applications have been taken over the phone for decades
+// and which the URLA has a box for ("This application was taken by: Face-to-Face / Telephone").
+//
+// A team-taken turn differs from a borrower's in three ways, and all three matter:
+//   • the value lands as `team_entry`, never as the borrower's own words
+//   • the turn records taken_by + taken_via, so the transcript does not read as if the borrower
+//     typed it
+//   • it changes nothing about attestation — see application-attest, which still refuses anyone
+//     who is not the borrower. The team can collect the information; only the borrower can
+//     swear to it.
 //
 // One borrower turn. The ordering here IS the §24 guarantee and must not be rearranged:
 //
@@ -15,7 +27,7 @@
 
 import { admin, isConfigured } from './_lib/supabase.mjs'
 import {
-  authUser, json, preflight, loadLoanFile, resolveAccess, canSeeFinancials, logAccess,
+  authUser, json, preflight, loadLoanFile, resolveAccess, isInternal, canSeeFinancials, logAccess,
 } from './_lib/portal.mjs'
 import { readJsonBody, isUuid, isEnum, boundedString } from './_lib/requestGuard.mjs'
 import { isValidIdempotencyKey, requestHash } from './_lib/idempotency.mjs'
@@ -25,16 +37,20 @@ import {
   conversational1003Enabled, selectProvider, interpretWithProvider, SYSTEM_PROMPT_VERSION,
 } from './_lib/conversational1003.mjs'
 import {
-  ensureApplication, ensureParty, listParties, loadState, persistEvents, syncProjection,
-  claimTurn, updateTurn, saveAskedHistory, updateApplication, currentMonth, newId,
+  ensureApplication, ensureParty, ensurePartyByIndex, listParties, loadState, persistEvents,
+  syncProjection, claimTurn, updateTurn, saveAskedHistory, updateApplication, currentMonth, newId,
 } from './_lib/applicationRepo.mjs'
 import { processTurn, buildProviderContext } from '../../src/features/conversational-1003/engine.js'
-import { validateTurnResponse } from '../../src/features/conversational-1003/turnContract.js'
+import { validateTurnResponse, redactSensitive } from '../../src/features/conversational-1003/turnContract.js'
 import { planNextQuestion } from '../../src/features/conversational-1003/questionPlanner.js'
 import { buildReview } from '../../src/features/conversational-1003/review.js'
 import { BORROWER_INTENTS, SUPPORTED_LOCALES } from '../../src/features/conversational-1003/types.js'
 
 const MAX_TEXT = 4000
+
+// How the loan team collected the answers. 'self' is not offered: it means the borrower typed
+// it themselves, which is the case where nobody is answering on anyone's behalf.
+const TAKEN_VIA = ['phone', 'in_person', 'video']
 
 // A dedicated limiter, not the shared one: sharedLimiter() is a process-wide singleton whose
 // first caller fixes the window for everyone, and lead-submit's public limits are much tighter
@@ -59,7 +75,12 @@ export default async (req) => {
   if (!isValidIdempotencyKey(body.idempotencyKey)) {
     return json({ ok: false, error: 'A valid idempotencyKey is required' }, 400)
   }
-  const text = boundedString(body.text, MAX_TEXT) || ''
+  // Scrubbed HERE, not in the engine. The engine redacts too, but it does not run until step 3
+  // — and step 1 has already written the turn row durably by then. That row is what the team
+  // review screen renders as "their own words", so an SSN read out over the phone and typed in
+  // here was persisting and being displayed. Redacting at the boundary makes the guarantee true
+  // for every path: what is stored, what reaches the provider, and what the engine sees.
+  const text = redactSensitive(boundedString(body.text, MAX_TEXT) || '').text
   const intent = isEnum(body.intent, BORROWER_INTENTS) ? body.intent : 'answer'
   const locale = isEnum(body.locale, SUPPORTED_LOCALES) ? body.locale : 'en'
   const inputMode = isEnum(body.inputMode, ['text', 'voice']) ? body.inputMode : 'text'
@@ -82,9 +103,27 @@ export default async (req) => {
     return json({ ok: false, error: 'Database error' }, 500)
   }
   if (!loanFile) return json({ ok: false, error: 'Loan file not found' }, 404)
-  // Only the borrower side answers questions. Internal users correct via the team endpoint.
-  if (!access || !['borrower', 'coborrower'].includes(access.visibility)) {
+
+  // Two kinds of caller, and the difference decides everything downstream. Realtors, escrow and
+  // title reach neither branch.
+  const borrowerSide = Boolean(access) && ['borrower', 'coborrower'].includes(access.visibility)
+  const teamSide = isInternal(access)
+  if (!borrowerSide && !teamSide) {
     return json({ ok: false, error: 'Not authorized for this loan file' }, 403)
+  }
+
+  // A team member must say who they are answering for and how they collected it. Neither is
+  // inferable, and a wrong guess writes a false record — so both are required rather than
+  // defaulted.
+  let assistPartyIndex = null
+  let takenVia = null
+  if (!borrowerSide) {
+    assistPartyIndex = body.assistParty === 1 ? 1 : (body.assistParty === 0 ? 0 : null)
+    if (assistPartyIndex === null) {
+      return json({ ok: false, error: 'Say whether you are entering this for the borrower or the co-borrower.' }, 400)
+    }
+    takenVia = isEnum(body.takenVia, TAKEN_VIA) ? body.takenVia : null
+    if (!takenVia) return json({ ok: false, error: 'Record how this application is being taken.' }, 400)
   }
 
   const correlationId = newId()
@@ -93,9 +132,13 @@ export default async (req) => {
     if (['borrower_attested', 'accepted_into_loan_file'].includes(application.status)) {
       return json({ ok: false, error: 'This application has been submitted for review.' }, 409)
     }
-    const party = await ensureParty(svc, {
-      application, loanFile, userId: auth.user.id, visibility: access.visibility, locale,
-    })
+    // The team member does not become a party to the application they are taking. They fill the
+    // borrower's seat; the borrower claims it when they sign in.
+    const party = borrowerSide
+      ? await ensureParty(svc, {
+        application, loanFile, userId: auth.user.id, visibility: access.visibility, locale,
+      })
+      : await ensurePartyByIndex(svc, { application, loanFile, partyIndex: assistPartyIndex, locale })
     const parties = await listParties(svc, application.id)
     const partyCount = Math.max(1, parties.length)
 
@@ -114,6 +157,10 @@ export default async (req) => {
         asked_field_path: boundedString(body.askedFieldPath, 200),
         intent,
         prompt_version: SYSTEM_PROMPT_VERSION,
+        // null on a borrower's own turn: the party answered for themselves, which is what an
+        // absent value has always meant on every row written before this existed.
+        taken_by: borrowerSide ? null : auth.user.id,
+        taken_via: borrowerSide ? null : takenVia,
       },
     })
     if (claim.conflict) {
@@ -173,10 +220,18 @@ export default async (req) => {
     }
 
     // ── 5 + 6: deterministic state update and next question ────────────────
+    // What the team relays is not the borrower's own wording, however faithfully it was heard.
+    // `team_entry` is what makes the review screen able to say "not borrower-stated" — and it
+    // is what keeps a phone-taken value distinguishable from one the borrower typed.
+    const source = !borrowerSide ? 'team_entry'
+      : (inputMode === 'voice' ? 'borrower_voice_transcript' : 'borrower_text')
     const out = processTurn(state, {
-      turnId, text, source: inputMode === 'voice' ? 'borrower_voice_transcript' : 'borrower_text',
+      turnId, text, source,
       locale, askedQuestion, interpretation, intent, askedHistory,
       at: new Date().toISOString(), asOfMonth, ids: newId,
+      // Stamped only on team-taken values. On a borrower's own turn the party row already says
+      // who spoke, and an actor there would read as somebody else having entered it.
+      actor: borrowerSide ? null : auth.user.id,
     })
 
     const newEvents = out.state.events.slice(state.events.length)
@@ -209,13 +264,18 @@ export default async (req) => {
       percent_complete: out.report.percent,
     })
     await logAccess(svc, {
-      portalUser: auth.user.id, loanFileId, action: 'application_turn', target: turnId, req,
+      portalUser: auth.user.id, loanFileId,
+      action: borrowerSide ? 'application_turn' : 'application_turn_assisted',
+      target: turnId, req,
     })
 
     // ── 7 ──────────────────────────────────────────────────────────────────
     return json({
       ok: true,
       turnId,
+      // Echoed so the screen can keep saying whose application this is. A team member who forgets
+      // they are entering for someone else is how a file ends up misattributed.
+      assisted: borrowerSide ? null : { partyIndex: assistPartyIndex, takenVia },
       accepted: out.accepted,
       message: out.message,
       confirmation: out.confirmation,
