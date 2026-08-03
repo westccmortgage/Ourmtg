@@ -50,19 +50,28 @@ export function newIdempotencyKey(prefix = 'c1003') {
   return `${prefix}.${rand}`.replace(/[^A-Za-z0-9_.:-]/g, '').slice(0, 200)
 }
 
-export const getSession = (loanFileId, locale = 'en') =>
-  call(`application-session?loanFileId=${encodeURIComponent(loanFileId)}&locale=${encodeURIComponent(locale)}`)
+// `assistParty` is only meaningful for the loan team: it says whose seat they are filling. The
+// server ignores it for a borrower, who can only ever be answering for themselves.
+export const getSession = (loanFileId, locale = 'en', assistParty = null) =>
+  call(`application-session?loanFileId=${encodeURIComponent(loanFileId)}&locale=${encodeURIComponent(locale)}`
+    + (assistParty === 0 || assistParty === 1 ? `&assistParty=${assistParty}` : ''))
 
-export const sendTurn = ({ loanFileId, text, intent = 'answer', locale = 'en', inputMode = 'text', askedQuestionId, askedFieldPath, idempotencyKey }) =>
+export const sendTurn = ({ loanFileId, text, intent = 'answer', locale = 'en', inputMode = 'text', askedQuestionId, askedFieldPath, idempotencyKey, assistParty, takenVia }) =>
   call('application-turn', {
     method: 'POST',
-    body: { loanFileId, text, intent, locale, inputMode, askedQuestionId, askedFieldPath, idempotencyKey },
+    body: {
+      loanFileId, text, intent, locale, inputMode, askedQuestionId, askedFieldPath, idempotencyKey,
+      ...(assistParty === 0 || assistParty === 1 ? { assistParty, takenVia } : {}),
+    },
   })
 
-export const confirmValues = ({ loanFileId, action, paths, fieldPath, chosenValue, locale = 'en', idempotencyKey }) =>
+export const confirmValues = ({ loanFileId, action, paths, fieldPath, chosenValue, locale = 'en', idempotencyKey, assistParty, takenVia }) =>
   call('application-confirm', {
     method: 'POST',
-    body: { loanFileId, action, paths, fieldPath, chosenValue, locale, idempotencyKey },
+    body: {
+      loanFileId, action, paths, fieldPath, chosenValue, locale, idempotencyKey,
+      ...(assistParty === 0 || assistParty === 1 ? { assistParty, takenVia } : {}),
+    },
   })
 
 export const saveSecureField = ({ loanFileId, fieldPath, value, locale = 'en', idempotencyKey }) =>

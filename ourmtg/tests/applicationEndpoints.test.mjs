@@ -15,6 +15,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createFakeSupabase, makeRequest, setTestEnv } from './_fakeSupabase.mjs'
+import { ATTESTATION_VERSION } from '../src/features/conversational-1003/attestationText.js'
 
 const LOAN = '11111111-1111-4111-8111-111111111111'
 const OTHER_LOAN = '22222222-2222-4222-8222-222222222222'
@@ -425,4 +426,277 @@ test('the mock provider can never be selected without an explicit opt-in', async
   const allowed = selectProvider({ env: { CONVERSATIONAL_1003_PROVIDER: 'mock', CONVERSATIONAL_1003_ALLOW_MOCK: 'true' } })
   assert.equal(allowed.ok, true)
   assert.equal(allowed.provider.name, 'mock')
+})
+
+// ── the loan team taking the application on someone's behalf ─────────────────
+// Taking a 1003 over the phone is the ordinary case, not an exception. What these prove is that
+// doing it never produces a record claiming the borrower said something they did not.
+
+const assistUrl = (party = 0, loanFileId = LOAN) =>
+  `https://app.test/.netlify/functions/application-session?loanFileId=${loanFileId}&assistParty=${party}`
+
+test('an internal viewer gets no question until they say they are taking the application', async () => {
+  const fake = createFakeSupabase({ tables: BASE_TABLES(), users: USERS })
+  const restore = install(fake)
+  try {
+    const h = await loadHandlers()
+    const looking = await (await h.session(makeRequest(sessionUrl(), { token: 'tok-owner' }))).json()
+    // Reviewing a file and conducting an interview are different acts; being internal is not
+    // itself a declaration of which one is happening.
+    assert.equal(looking.nextQuestion, null)
+    assert.equal(looking.assisting, null)
+    assert.equal(fake.rowsOf('application_parties').length, 0)
+
+    const taking = await (await h.session(makeRequest(assistUrl(0), { token: 'tok-owner' }))).json()
+    assert.ok(taking.nextQuestion, 'the team gets the same first question the borrower would')
+    assert.equal(taking.assisting.role, 'borrower')
+    assert.equal(taking.assisting.borrowerName, 'Daria N')
+    assert.equal(taking.assisting.canAttest, false)
+  } finally { restore() }
+})
+
+test('the team member fills the borrower’s seat without becoming the borrower', async () => {
+  const fake = createFakeSupabase({ tables: BASE_TABLES(), users: USERS })
+  const restore = install(fake)
+  try {
+    const h = await loadHandlers()
+    await h.session(makeRequest(assistUrl(0), { token: 'tok-owner' }))
+
+    const parties = fake.rowsOf('application_parties')
+    assert.equal(parties.length, 1)
+    assert.equal(parties[0].party_index, 0)
+    // The seat is open, not occupied. An owner bound into portal_user here would make the loan
+    // officer a party to the borrower's own application.
+    assert.equal(parties[0].portal_user, null)
+  } finally { restore() }
+})
+
+test('a borrower signing in later claims the seat the team opened, rather than colliding with it', async () => {
+  const fake = createFakeSupabase({ tables: BASE_TABLES(), users: USERS })
+  const restore = install(fake)
+  try {
+    const h = await loadHandlers()
+    await h.session(makeRequest(assistUrl(0), { token: 'tok-owner' }))
+    const opened = fake.rowsOf('application_parties')[0]
+
+    const borrower = await (await h.session(makeRequest(sessionUrl(), { token: 'tok-borrower' }))).json()
+    const parties = fake.rowsOf('application_parties')
+    assert.equal(parties.length, 1, 'no second party row at the same index')
+    assert.equal(borrower.party.id, opened.id, 'the borrower inherits what was recorded for them')
+    assert.equal(parties[0].portal_user, BORROWER)
+  } finally { restore() }
+})
+
+test('a team-taken answer is recorded as team_entry, with who took it and how', async () => {
+  const fake = createFakeSupabase({ tables: BASE_TABLES(), users: USERS })
+  const restore = install(fake)
+  try {
+    const h = await loadHandlers()
+    await h.session(makeRequest(assistUrl(0), { token: 'tok-owner' }))
+
+    const res = await h.turn(makeRequest('https://app.test/x', {
+      method: 'POST', token: 'tok-owner',
+      body: {
+        loanFileId: LOAN, text: 'purchase', idempotencyKey: key('assist'),
+        assistParty: 0, takenVia: 'phone',
+      },
+    }))
+    assert.equal(res.status, 200)
+    const body = await res.json()
+    assert.deepEqual(body.assisted, { partyIndex: 0, takenVia: 'phone' })
+
+    const turn = fake.rowsOf('application_turns')[0]
+    assert.equal(turn.taken_by, OWNER)
+    assert.equal(turn.taken_via, 'phone')
+
+    // The value itself is attributed to the team, not to the borrower's own words. This is what
+    // lets the review screen say "not borrower-stated" months later.
+    const events = fake.rowsOf('application_field_events')
+    assert.ok(events.length > 0, 'the answer was captured')
+    for (const e of events) {
+      if (e.source === 'system_derived') continue
+      assert.equal(e.source, 'team_entry', e.field_path)
+      assert.equal(e.actor_user_id, OWNER)
+    }
+  } finally { restore() }
+})
+
+test('a borrower’s own turn is never stamped as taken by someone else', async () => {
+  const fake = createFakeSupabase({ tables: BASE_TABLES(), users: USERS })
+  const restore = install(fake)
+  try {
+    const h = await loadHandlers()
+    await h.session(makeRequest(sessionUrl(), { token: 'tok-borrower' }))
+    await h.turn(makeRequest('https://app.test/x', {
+      method: 'POST', token: 'tok-borrower',
+      body: { loanFileId: LOAN, text: 'purchase', idempotencyKey: key('own') },
+    }))
+    const turn = fake.rowsOf('application_turns')[0]
+    assert.equal(turn.taken_by, null)
+    assert.equal(turn.taken_via, null)
+    for (const e of fake.rowsOf('application_field_events')) {
+      if (e.source === 'system_derived') continue
+      assert.equal(e.source, 'borrower_text')
+    }
+    // A borrower cannot promote themselves by claiming to be taking it for someone.
+    await h.turn(makeRequest('https://app.test/x', {
+      method: 'POST', token: 'tok-borrower',
+      body: {
+        loanFileId: LOAN, text: 'refinance', idempotencyKey: key('own2'),
+        assistParty: 1, takenVia: 'phone',
+      },
+    }))
+    assert.equal(fake.rowsOf('application_turns').every((t) => t.taken_by === null), true)
+  } finally { restore() }
+})
+
+test('a team member must say who they are answering for, and how', async () => {
+  const fake = createFakeSupabase({ tables: BASE_TABLES(), users: USERS })
+  const restore = install(fake)
+  try {
+    const h = await loadHandlers()
+    const send = (body) => h.turn(makeRequest('https://app.test/x', {
+      method: 'POST', token: 'tok-owner', body: { loanFileId: LOAN, text: 'purchase', ...body },
+    }))
+    // Neither is inferable, and a wrong guess writes a false record — so neither is defaulted.
+    assert.equal((await send({ idempotencyKey: key('n1'), takenVia: 'phone' })).status, 400)
+    assert.equal((await send({ idempotencyKey: key('n2'), assistParty: 0 })).status, 400)
+    assert.equal((await send({ idempotencyKey: key('n3'), assistParty: 0, takenVia: 'carrier_pigeon' })).status, 400)
+    assert.equal(fake.rowsOf('application_turns').length, 0)
+  } finally { restore() }
+})
+
+test('a realtor cannot take the application either, whatever they claim', async () => {
+  const fake = createFakeSupabase({ tables: BASE_TABLES(), users: USERS })
+  const restore = install(fake)
+  try {
+    const h = await loadHandlers()
+    for (const token of ['tok-realtor', 'tok-stranger']) {
+      const res = await h.turn(makeRequest('https://app.test/x', {
+        method: 'POST', token,
+        body: {
+          loanFileId: LOAN, text: 'purchase', idempotencyKey: key('nope'),
+          assistParty: 0, takenVia: 'phone',
+        },
+      }))
+      assert.equal(res.status, 403, token)
+    }
+    assert.equal(fake.rowsOf('application_turns').length, 0)
+  } finally { restore() }
+})
+
+test('the team can take the whole application and still cannot sign it', async () => {
+  const fake = createFakeSupabase({ tables: BASE_TABLES(), users: USERS })
+  const restore = install(fake)
+  try {
+    const h = await loadHandlers()
+    await h.session(makeRequest(assistUrl(0), { token: 'tok-owner' }))
+    await h.turn(makeRequest('https://app.test/x', {
+      method: 'POST', token: 'tok-owner',
+      body: {
+        loanFileId: LOAN, text: 'purchase', idempotencyKey: key('sign'),
+        assistParty: 0, takenVia: 'phone',
+      },
+    }))
+
+    // Attestation is the borrower's act and stays so — the team is refused on authorization,
+    // before completeness is even considered.
+    const res = await h.attest(makeRequest('https://app.test/x', {
+      method: 'POST', token: 'tok-owner',
+      body: {
+        loanFileId: LOAN, idempotencyKey: key('att'), accepted: true,
+        // The real current version, so this proves the authorization refusal and not the
+        // stale-document check that runs before it.
+        documentVersion: ATTESTATION_VERSION, presentedAt: new Date().toISOString(),
+      },
+    }))
+    assert.equal(res.status, 403)
+    assert.equal(fake.rowsOf('application_attestations').length, 0)
+
+    // And the screen is never told otherwise.
+    const s = await (await h.session(makeRequest(assistUrl(0), { token: 'tok-owner' }))).json()
+    assert.equal(s.canAttest, false)
+  } finally { restore() }
+})
+
+test('the team cannot enter a Social Security number through the conversation', async () => {
+  const fake = createFakeSupabase({ tables: BASE_TABLES(), users: USERS })
+  const restore = install(fake)
+  try {
+    const h = await loadHandlers()
+    await h.session(makeRequest(assistUrl(0), { token: 'tok-owner' }))
+
+    // The secure endpoint refuses them outright...
+    const secure = await h.secure(makeRequest('https://app.test/x', {
+      method: 'POST', token: 'tok-owner',
+      body: { loanFileId: LOAN, fieldPath: 'parties[0].ssn', value: '123-45-6789', idempotencyKey: key('ssn') },
+    }))
+    assert.equal(secure.status, 403)
+
+    // ...and reading one out over the phone into the chat box does not store it either.
+    await h.turn(makeRequest('https://app.test/x', {
+      method: 'POST', token: 'tok-owner',
+      body: {
+        loanFileId: LOAN, text: 'his social is 123-45-6789', idempotencyKey: key('ssn2'),
+        assistParty: 0, takenVia: 'phone',
+      },
+    }))
+    const stored = JSON.stringify(fake.rowsOf('application_turns')) + JSON.stringify(fake.rowsOf('application_field_events'))
+    assert.doesNotMatch(stored, /123-?45-?6789/)
+  } finally { restore() }
+})
+
+test('a team confirmation is recorded as the team’s, not as the borrower being unsure', async () => {
+  const fake = createFakeSupabase({ tables: BASE_TABLES(), users: USERS })
+  const restore = install(fake)
+  try {
+    const h = await loadHandlers()
+    await h.session(makeRequest(assistUrl(0), { token: 'tok-owner' }))
+    await h.turn(makeRequest('https://app.test/x', {
+      method: 'POST', token: 'tok-owner',
+      body: {
+        loanFileId: LOAN, text: 'purchase', idempotencyKey: key('c1'),
+        assistParty: 0, takenVia: 'phone',
+      },
+    }))
+
+    const res = await h.confirm(makeRequest('https://app.test/x', {
+      method: 'POST', token: 'tok-owner',
+      body: {
+        loanFileId: LOAN, action: 'unsure', paths: ['loan.purpose'],
+        idempotencyKey: key('c2'), assistParty: 0, takenVia: 'phone',
+      },
+    }))
+    assert.equal(res.status, 200)
+    assert.equal((await res.json()).canAttest, false)
+
+    const flagged = fake.rowsOf('application_field_events').filter((e) => e.clarification_reason)
+    assert.ok(flagged.length > 0)
+    // "The borrower was unsure" and "the person writing it down was unsure" are different
+    // follow-ups; recording the first when the second happened sends someone back to the
+    // borrower over a transcription doubt.
+    for (const e of flagged) assert.equal(e.clarification_reason, 'taken_by_team_unsure')
+  } finally { restore() }
+})
+
+test('an SSN typed into the conversation never reaches the durable turn row', async () => {
+  // Regression. The engine redacted, but not until step 3 — and step 1 has already written the
+  // turn row, which is what the team review screen renders as the borrower's own words. The
+  // guarantee now holds at the boundary, for the borrower's own turns as much as the team's.
+  const fake = createFakeSupabase({ tables: BASE_TABLES(), users: USERS })
+  const restore = install(fake)
+  try {
+    const h = await loadHandlers()
+    await h.session(makeRequest(sessionUrl(), { token: 'tok-borrower' }))
+    await h.turn(makeRequest('https://app.test/x', {
+      method: 'POST', token: 'tok-borrower',
+      body: { loanFileId: LOAN, text: 'my ssn is 123-45-6789 and my account is 4123456789012', idempotencyKey: key('leak') },
+    }))
+    const stored = JSON.stringify(fake.rowsOf('application_turns'))
+    assert.doesNotMatch(stored, /123-?45-?6789/)
+    assert.doesNotMatch(stored, /4123456789012/)
+    // The turn is still there and still readable — redaction replaces, it does not discard.
+    assert.equal(fake.rowsOf('application_turns').length, 1)
+    assert.match(fake.rowsOf('application_turns')[0].borrower_text, /removed for your security/)
+  } finally { restore() }
 })

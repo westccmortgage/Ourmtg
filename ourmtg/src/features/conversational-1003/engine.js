@@ -29,7 +29,10 @@ import { deterministicInterpretation } from './deterministicExtract.js'
  *   turnId, text, source='borrower_text', locale='en', askedQuestion (the Question object),
  *   interpretation (output of validateTurnResponse().value, or null when unavailable),
  *   intent (BORROWER_INTENTS, default 'answer'), askedHistory, at, asOfMonth,
- *   ids: () => string, activeGroup, attested, teamAccepted
+ *   ids: () => string, activeGroup, attested, teamAccepted,
+ *   actor (the user id to stamp on values recorded this turn — set when the loan team is taking
+ *     the application on someone's behalf, null when the borrower is answering for themselves,
+ *     because there the party row is already the record of who spoke)
  * }
  */
 export function processTurn(state, input) {
@@ -37,7 +40,7 @@ export function processTurn(state, input) {
     turnId = null, text = '', source = 'borrower_text', locale = 'en',
     askedQuestion = null, interpretation = null, intent = 'answer',
     askedHistory = {}, at, asOfMonth, ids, activeGroup = null,
-    attested = false, teamAccepted = false,
+    attested = false, teamAccepted = false, actor = null,
   } = input
 
   const nextId = typeof ids === 'function' ? ids : (() => null)
@@ -93,6 +96,7 @@ export function processTurn(state, input) {
       at,
       eventId: nextId(),
       isCorrection: resolvedIntent === 'correct_something',
+      actor,
     })
     if (res.outcome === 'rejected') {
       rejectedOut.push({ path: e.fieldPath, reason: res.reason })

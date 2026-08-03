@@ -49,6 +49,24 @@ export default function ApplicationTeamReview() {
       <Link to={`/portal/file/${loanFileId}`} className="backlink">← Back to loan file</Link>
       <h1>Conversational application</h1>
 
+      {/* Unconditional, not shown only when the application is empty: the common case is a
+          borrower who got partway and called, and "pick up where they stopped" is the same
+          button as "start it for them". */}
+      {data.application.status !== 'borrower_attested' && data.application.status !== 'accepted_into_loan_file' && (
+        <Link to={`/portal/file/${loanFileId}/application/take`} className="card linkcard">
+          <div className="spread">
+            <div>
+              <h2 className="mb0">Fill this out with them</h2>
+              <p className="mb0 muted">
+                Take the application over the phone or in person. Recorded as entered by you; they
+                still review and submit it.
+              </p>
+            </div>
+            <span className="btn btn-primary btn-sm">Start →</span>
+          </div>
+        </Link>
+      )}
+
       <div className="c1003-team-summary">
         <p>
           <strong>{review.percent}%</strong> collected · status <code>{review.status}</code>

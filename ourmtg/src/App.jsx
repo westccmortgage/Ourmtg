@@ -62,6 +62,10 @@ export default function App() {
               <>
                 <Route path="application/assistant/:loanFileId" element={<RequireAuth><ApplicationAssistant /></RequireAuth>} />
                 <Route path="portal/file/:loanFileId/application" element={<RequireAuth><ApplicationTeamReview /></RequireAuth>} />
+                {/* The loan team taking the application over the phone. Same interview, same
+                    engine; the server records it as team-entered and still refuses to let them
+                    attest. Authorization is enforced there, not by this route existing. */}
+                <Route path="portal/file/:loanFileId/application/take" element={<RequireAuth><ApplicationAssistant assist /></RequireAuth>} />
                 {/* Short form of an application invite — texted, not clicked from an email.
                     Public by design: it only rewrites the URL, redemption still authorizes. */}
                 <Route path="1003/:token" element={<ShortLink1003 />} />
