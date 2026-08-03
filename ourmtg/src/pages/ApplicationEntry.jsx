@@ -5,21 +5,23 @@
 //
 //   • exactly one file  → straight in, no interstitial to click through
 //   • several           → ask which, rather than guessing
-//   • none              → say so plainly and point at the portal's invite-paste box, because the
-//                         usual cause is an invite link that was never redeemed
-//
-// The borrower-side grants are the only ones offered. A loan officer landing here has no
-// application of their own to fill out; they belong on the file, reviewing someone else's.
+//   • none              → depends on who they are, and getting this wrong is what made the page
+//                         useless: the loan officer who owns every file on the system has no
+//                         borrower grant either, so they were told to ask their loan officer for
+//                         a link. They ARE the loan officer. For them this address means the
+//                         other half of the same sentence — not "open my application" but
+//                         "send someone theirs" — so the send box is the page.
 import { Link, Navigate } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { useRole } from '../lib/useRole'
 import { resolveMyApplication, inviteHref } from '../lib/inviteDestination'
 import { pendingInvite } from '../lib/pendingInvite'
 import { Alert, Spinner } from '../components/ui'
+import SendAssistant from '../components/SendAssistant'
 
 export default function ApplicationEntry() {
   const { user, loading: authLoading } = useAuth()
-  const { loading, error, grants } = useRole()
+  const { loading, error, grants, roles, ownedFiles } = useRole()
 
   if (authLoading) return <Spinner />
   // Sign in, then come back here — not to the portal, or the short address quietly stops
@@ -65,6 +67,41 @@ export default function ApplicationEntry() {
     )
   }
 
+  // ── the loan team ────────────────────────────────────────────────────────
+  // No borrower grant, but they own files — or the review queue told us they are internal.
+  if (roles.includes('lo')) {
+    return (
+      <div style={{ maxWidth: 620, margin: '8px auto' }}>
+        <p className="fileno">Signed in as {user.email} · loan team</p>
+        <h1 style={{ marginBottom: 6 }}>Send someone the 1003</h1>
+        <p className="muted" style={{ marginBottom: 22 }}>
+          An application belongs to the borrower, so there isn’t one here for you to fill out —
+          you send them the link and review what comes back. Name and a way to reach them is all
+          it takes; the interview asks for the rest.
+        </p>
+
+        <SendAssistant />
+
+        {ownedFiles.length > 0 && (
+          <div className="card">
+            <div className="card-head"><h2>Or open one you already sent</h2></div>
+            {ownedFiles.slice(0, 12).map((f) => (
+              <Link key={f.loanFileId} to={`/portal/file/${f.loanFileId}/application`} className="row linkcard">
+                <div className="spread">
+                  <div className="rlabel">{f.borrowerName || 'Unnamed borrower'}</div>
+                  <span className="btn btn-sm">Review →</span>
+                </div>
+              </Link>
+            ))}
+            {ownedFiles.length > 12 && (
+              <p className="hint"><Link to="/portal">See all {ownedFiles.length} files →</Link></p>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div style={{ maxWidth: 520, margin: '8px auto' }}>
       <p className="fileno">Signed in as {user.email} · no file linked yet</p>
@@ -80,6 +117,19 @@ export default function ApplicationEntry() {
           Email apps break links often enough that it’s worth trying there.
         </p>
         <Link to="/portal" className="btn btn-primary btn-sm">Go to my portal</Link>
+      </div>
+
+      {/* An account with no grants and no files is ambiguous: it is a borrower whose link never
+          redeemed, or it is a broker on their first day, and the page cannot tell which. Guessing
+          borrower is how the owner of this system ended up being told to contact his loan officer.
+          Both doors, second one plainly labelled, is better than picking wrong. */}
+      <div style={{ marginTop: 28 }}>
+        <h2 style={{ marginBottom: 6 }}>Sending one instead?</h2>
+        <p className="muted" style={{ marginTop: 0 }}>
+          If you’re the loan officer and it’s the borrower who needs the application, this makes
+          their file and their link together.
+        </p>
+        <SendAssistant />
       </div>
     </div>
   )
