@@ -19,6 +19,16 @@ const UNIQUE_KEYS = {
   application_secure_fields: ['application_id', 'field_path', 'party_id'],
 }
 
+// Partial unique indexes the fake cannot express as a plain key list. The live-rule index on
+// pre_underwriting_findings applies only WHERE superseded_by is null, and losing that nuance
+// would make a legitimate re-run look like a duplicate-key error.
+const PARTIAL_UNIQUE = {
+  pre_underwriting_findings: {
+    keys: ['loan_file_id', 'rule'],
+    where: (r) => r.superseded_by === null || r.superseded_by === undefined,
+  },
+}
+
 let counter = 0
 const uuid = () => {
   counter++
@@ -26,8 +36,11 @@ const uuid = () => {
   return `00000000-0000-4000-8000-${h}`
 }
 
-export function createFakeSupabase({ tables = {}, users = {} } = {}) {
+export function createFakeSupabase({ tables = {}, users = {}, storage = {} } = {}) {
   const db = {}
+  // path -> { body: Buffer|string, type: string }. Documents live in Storage, not in a table,
+  // so the intake endpoint cannot be exercised at all without this.
+  const files = { ...storage }
   for (const [t, rows] of Object.entries(tables)) db[t] = rows.map((r) => ({ ...r }))
 
   const calls = []
@@ -42,10 +55,16 @@ export function createFakeSupabase({ tables = {}, users = {} } = {}) {
     let out = rows
     for (const [key, raw] of params.entries()) {
       if (['select', 'order', 'limit', 'offset', 'on_conflict', 'columns'].includes(key)) continue
-      const m = /^(eq|in|neq)\.(.*)$/s.exec(raw)
+      // `is.null` matters more than it looks: the pre-underwriting repo selects live rows with
+      // .is('superseded_by', null), and an unimplemented operator here is silently ignored — the
+      // query returns superseded rows too and the test passes for the wrong reason.
+      const m = /^(eq|in|neq|is)\.(.*)$/s.exec(raw)
       if (!m) continue
       const [, op, value] = m
-      if (op === 'eq') out = out.filter((r) => String(r[key] ?? '') === value)
+      if (op === 'is') {
+        const wantNull = value === 'null'
+        out = out.filter((r) => (r[key] === null || r[key] === undefined) === wantNull)
+      } else if (op === 'eq') out = out.filter((r) => String(r[key] ?? '') === value)
       else if (op === 'neq') out = out.filter((r) => String(r[key] ?? '') !== value)
       else if (op === 'in') {
         const list = value.replace(/^\(|\)$/g, '').split(',').map((s) => s.replace(/^"|"$/g, ''))
@@ -72,6 +91,12 @@ export function createFakeSupabase({ tables = {}, users = {} } = {}) {
   )
 
   function violatesUnique(table, row) {
+    const partial = PARTIAL_UNIQUE[table]
+    if (partial) {
+      if (!partial.where(row)) return false
+      return rowsOf(table).some((r) => partial.where(r)
+        && partial.keys.every((k) => String(r[k] ?? '') === String(row[k] ?? '')))
+    }
     const keys = UNIQUE_KEYS[table]
     if (!keys) return false
     return rowsOf(table).some((r) => keys.every((k) => String(r[k] ?? '') === String(row[k] ?? '')))
@@ -89,6 +114,16 @@ export function createFakeSupabase({ tables = {}, users = {} } = {}) {
       const user = token ? users[token] : null
       if (!user) return json({ message: 'invalid token' }, 401)
       return json(user)
+    }
+
+    // ── Storage: object download ────────────────────────────────────────────
+    if (u.pathname.startsWith('/storage/v1/object/')) {
+      const path = decodeURIComponent(u.pathname.replace(/^\/storage\/v1\/object\/(authenticated\/)?/, ''))
+      const key = path.replace(/^ourmtg-docs\//, '')
+      const hit = files[key] ?? files[path]
+      if (!hit) return new Response(JSON.stringify({ message: 'Object not found' }), { status: 404 })
+      const body = typeof hit.body === 'string' ? Buffer.from(hit.body, 'utf8') : hit.body
+      return new Response(body, { status: 200, headers: { 'content-type': hit.type || 'application/octet-stream' } })
     }
 
     const table = u.pathname.replace('/rest/v1/', '')
@@ -145,6 +180,8 @@ export function createFakeSupabase({ tables = {}, users = {} } = {}) {
     db,
     calls,
     rowsOf,
+    files,
+    putFile: (path, body, type) => { files[path] = { body, type } },
     failNextInsertOn: (t) => { state.failNextInsertOn = t },
   }
 }

@@ -11,6 +11,8 @@ import { Alert, Empty } from '../components/ui'
 import { flag } from '../domain/flags'
 import { filesChangedSince, blockerSummary, filesNeedingBorrowerAction } from '../lib/loanTeamOps'
 import SendAssistant from '../components/SendAssistant'
+import { conversational1003Enabled } from '../features/conversational-1003/clientFlag'
+import { preUnderwritingEnabled } from '../features/pre-underwriting/clientFlag'
 
 export default function LODashboard({ files }) {
   const navigate = useNavigate()
@@ -121,6 +123,20 @@ export default function LODashboard({ files }) {
                       <strong>{f.borrowerName || '—'}</strong>
                       {f.stuck && <span className="chip red" style={{ marginLeft: 6 }}>stuck</span>}
                       {f.loanNumber && <div className="muted" style={{ fontSize: 12 }}>#{f.loanNumber}</div>}
+                      {/* Straight to the two screens actually worked from. Without these the
+                          1003 is two clicks deep behind a row nothing labels as clickable —
+                          which is exactly how it went missing. stopPropagation so the link
+                          wins over the row's own navigation. */}
+                      <div className="pill-row" style={{ marginTop: 4 }}>
+                        {conversational1003Enabled() && (
+                          <Link to={`/portal/file/${f.loanFileId}/application`} className="linklike"
+                            onClick={(e) => e.stopPropagation()}>1003 →</Link>
+                        )}
+                        {preUnderwritingEnabled() && (
+                          <Link to={`/portal/file/${f.loanFileId}/pre-underwriting`} className="linklike"
+                            onClick={(e) => e.stopPropagation()}>Pre-underwriting →</Link>
+                        )}
+                      </div>
                     </td>
                     <td>{f.stageLabel}</td>
                     <td>{f.missingDocs || '—'}</td>

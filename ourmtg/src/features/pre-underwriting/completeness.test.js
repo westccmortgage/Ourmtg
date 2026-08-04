@@ -4,7 +4,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { assessCompleteness, missingForFile, documentReadiness } from './completeness.js'
-import { DOCUMENT_TYPES, getDocumentType, isKnownDocumentType } from './documentCatalog.js'
+import { DOCUMENT_TYPES, getDocumentType, isKnownDocumentType, NEVER_ECHOED, providedBy } from './documentCatalog.js'
 
 const AS_OF = Date.parse('2026-07-30T00:00:00Z')
 const at = { asOf: AS_OF }
@@ -190,4 +190,73 @@ test('nothing the borrower is asked for reads as a conclusion about them', () =>
   for (const s of samples) {
     for (const g of s.gaps) assert.doesNotMatch(g.message, forbidden, g.message)
   }
+})
+
+// ── credit ──────────────────────────────────────────────────────────────────
+// The credit report is the one required document the borrower cannot produce, and the one
+// where a plausible substitute arrives constantly and cannot be used.
+
+const credit = (extra = {}) => ({
+  reportDate: '2026-07-01', documentDate: '2026-07-01',
+  bureausIncluded: ['Equifax', 'Experian', 'TransUnion'],
+  equifaxScore: 728, experianScore: 741, transUnionScore: 733,
+  ...extra,
+})
+
+test('a current tri-merge is complete', () => {
+  assert.equal(assessCompleteness('credit_report', [credit()], at).complete, true)
+})
+
+test('a single-bureau report is not a tri-merge', () => {
+  // The middle score cannot be determined from one bureau. Calling this complete sends the file
+  // to underwriting to be handed straight back.
+  const r = assessCompleteness('credit_report', [credit({
+    bureausIncluded: ['Experian'], equifaxScore: null, transUnionScore: null,
+  })], at)
+  assert.equal(r.complete, false)
+  assert.ok(codes(r).includes('not_tri_merge'))
+})
+
+test('three scores count as three bureaus even with no summary line', () => {
+  assert.equal(assessCompleteness('credit_report', [credit({ bureausIncluded: null })], at).complete, true)
+})
+
+test('a comma-separated bureau line is the same fact as a list', () => {
+  assert.equal(assessCompleteness('credit_report', [credit({
+    bureausIncluded: 'Equifax, Experian and TransUnion',
+    equifaxScore: null, experianScore: null, transUnionScore: null,
+  })], at).complete, true)
+})
+
+test('a consumer credit app report is refused, however current', () => {
+  const r = assessCompleteness('credit_report', [credit({ isConsumerReport: true })], at)
+  assert.equal(r.complete, false)
+  assert.ok(codes(r).includes('consumer_report'))
+})
+
+test('a credit report older than 120 days cannot be used', () => {
+  const r = assessCompleteness('credit_report', [credit({
+    reportDate: '2026-01-01', documentDate: '2026-01-01',
+  })], at)
+  assert.ok(codes(r).includes('stale'))
+})
+
+test('the borrower is never asked for a document only the loan team can pull', () => {
+  const checklist = [{ docKey: 'paystubs_30d' }, { docKey: 'credit_report' }]
+  const forBorrower = missingForFile(checklist, {}, { ...at, providedBy: 'borrower' })
+  const forTeam = missingForFile(checklist, {}, { ...at, providedBy: 'loan_team' })
+  const everything = missingForFile(checklist, {}, at)
+
+  assert.deepEqual(forBorrower.map((m) => m.docKey), ['paystubs_30d'])
+  assert.deepEqual(forTeam.map((m) => m.docKey), ['credit_report'])
+  // The processor still sees both — it is outstanding, it is just not the borrower's to send.
+  assert.deepEqual(everything.map((m) => m.docKey), ['paystubs_30d', 'credit_report'])
+})
+
+test('the credit report is never echoed back to a borrower', () => {
+  // Not a privacy nicety: a borrower learning their standing from a page this system rendered
+  // is an adverse-action disclosure made by the wrong party, without the notice the law requires.
+  assert.ok(NEVER_ECHOED.includes('credit_report'))
+  assert.equal(providedBy('credit_report'), 'loan_team')
+  assert.equal(providedBy('paystubs_30d'), 'borrower')
 })

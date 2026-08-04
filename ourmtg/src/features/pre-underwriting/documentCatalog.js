@@ -19,6 +19,11 @@
  * @property {string[]} hints        phrases that identify the document in its own text
  * @property {object} completeness   declarative rules — see assessCompleteness
  * @property {string[]} extract      fields worth pulling, for the team's use
+ * @property {'borrower'|'loan_team'} [providedBy]
+ *   Who can actually produce it. Defaults to 'borrower'. A credit report is the reason this
+ *   exists: it is required, it is missing, and asking the borrower for it is asking them for
+ *   something they cannot get — a mortgage tri-merge is pulled by the loan team under the
+ *   borrower's authorization, not downloaded by the consumer.
  */
 
 /** @type {Record<string, DocType>} */
@@ -123,6 +128,26 @@ export const DOCUMENT_TYPES = Object.freeze({
     completeness: {},
     extract: ['veteranName', 'characterOfService', 'separationDate'],
   },
+  credit_report: {
+    key: 'credit_report',
+    label: 'Credit report (tri-merge)',
+    // Pulled by the loan team under the borrower's authorization. Listing it as a borrower
+    // document would put "please send your credit report" in front of someone who has no way
+    // to produce one — and would invite the substitute below.
+    providedBy: 'loan_team',
+    hints: [
+      'residential mortgage credit report', 'tri-merge', 'merged credit report',
+      'equifax', 'experian', 'trans union', 'transunion', 'fico score', 'credit repository',
+    ],
+    // 120 days is the agencies' outside limit at closing for existing construction. Anything
+    // older is not a stale nice-to-have; it cannot be used.
+    completeness: { freshWithinDays: 120, bureaus: 3, mortgageGrade: true },
+    extract: [
+      'reportDate', 'referenceNumber', 'creditAgency', 'bureausIncluded', 'borrowerName',
+      'equifaxScore', 'experianScore', 'transUnionScore',
+      'openTradelines', 'totalMonthlyDebt', 'isConsumerReport',
+    ],
+  },
 })
 
 export const DOCUMENT_KEYS = Object.freeze(Object.keys(DOCUMENT_TYPES))
@@ -130,7 +155,12 @@ export const DOCUMENT_KEYS = Object.freeze(Object.keys(DOCUMENT_TYPES))
 export const isKnownDocumentType = (key) => Object.hasOwn(DOCUMENT_TYPES, key)
 export const getDocumentType = (key) => (isKnownDocumentType(key) ? DOCUMENT_TYPES[key] : null)
 
+/** Who can actually produce this document. Defaults to the borrower. */
+export const providedBy = (key) => getDocumentType(key)?.providedBy || 'borrower'
+
 // Documents whose contents are read but never surfaced to a borrower beyond "we have it".
 // Identity documents in particular: echoing a scanned licence number back onto a web page is
-// a needless exposure of exactly the data the file exists to protect.
-export const NEVER_ECHOED = Object.freeze(['id_photo'])
+// a needless exposure of exactly the data the file exists to protect. The credit report is
+// here for a stronger reason — a borrower must never learn their standing from a page this
+// system rendered. That disclosure is the lender's, with the notice the law requires attached.
+export const NEVER_ECHOED = Object.freeze(['id_photo', 'credit_report'])

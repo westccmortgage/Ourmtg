@@ -88,7 +88,29 @@ const FIELD_TYPES = Object.freeze({
   ownershipPercent: 'number',
   accountLast4: 'last4',
   escrowIncluded: 'boolean',
+  reportDate: 'date',
+  equifaxScore: 'integer',
+  experianScore: 'integer',
+  transUnionScore: 'integer',
+  openTradelines: 'integer',
+  totalMonthlyDebt: 'number',
+  isConsumerReport: 'boolean',
 })
+
+// The one document whose value is a LIST. Everything else in the catalog yields scalars, and
+// the scalar-only rule is what keeps this contract small — but a credit report's whole point is
+// its tradelines, and `undisclosedLiabilities` cannot fire without them. So: one exception,
+// with its own closed shape, permitted on one document type and dropped everywhere else.
+const TRADELINE_FIELDS = Object.freeze({
+  creditorName: 'string',
+  accountType: 'string',
+  accountLast4: 'last4',
+  monthlyPayment: 'number',
+  balance: 'number',
+  status: 'string',
+})
+const TRADELINES_ALLOWED_ON = 'credit_report'
+export const MAX_TRADELINES = 100
 
 // A Social Security number is never a legitimate extraction from any document in the catalog —
 // there is a secure control for it, and it is the one value that turns a leaked row into an
@@ -159,6 +181,22 @@ export function validateExtractionResponse(raw, opts = {}) {
     rejected.push({ field: null, reason: 'fields_dropped_unclassified' })
   }
 
+  // ── tradelines ───────────────────────────────────────────────────────────
+  const tradelines = []
+  const rawTradelines = Array.isArray(raw.tradelines) ? raw.tradelines.slice(0, MAX_TRADELINES) : []
+  if (Array.isArray(raw.tradelines) && raw.tradelines.length > MAX_TRADELINES) errors.push('too_many_tradelines')
+  if (rawTradelines.length && docKey !== TRADELINES_ALLOWED_ON) {
+    // A pay stub does not have tradelines. Something that returns them is not reading the
+    // document in front of it, and the safe reading of that is to keep none of it.
+    rejected.push({ field: 'tradelines', reason: 'tradelines_not_on_this_type' })
+  } else {
+    for (const tl of rawTradelines) {
+      const v = validateTradeline(tl)
+      if (v.ok) tradelines.push(v.value)
+      else rejected.push({ field: 'tradelines', reason: v.reason })
+    }
+  }
+
   // ── prose ────────────────────────────────────────────────────────────────
   // Anything free-form went through the model from a document a stranger may have written.
   let notes = text(raw.notes, MAX_TEXT)
@@ -167,7 +205,8 @@ export function validateExtractionResponse(raw, opts = {}) {
 
   // ── review triggers ──────────────────────────────────────────────────────
   const legible = raw.legible === false ? false : true
-  const weakest = fields.length ? Math.min(...fields.map((f) => f.confidence)) : null
+  const confidences = [...fields.map((f) => f.confidence), ...tradelines.map((t) => t.confidence)]
+  const weakest = confidences.length ? Math.min(...confidences) : null
   const lowConfidenceClassification = docKeyConfidence === null || docKeyConfidence < CLASSIFY_CONFIDENCE_THRESHOLD
   // Uploaded under "Bank statements", reads as a pay stub. Either the borrower picked the wrong
   // slot or the model is wrong; both want eyes, and neither should quietly file itself.
@@ -195,6 +234,7 @@ export function validateExtractionResponse(raw, opts = {}) {
       docKeyMismatch: mismatch,
       legible,
       fields,
+      tradelines,
       minFieldConfidence: weakest,
       notes,
       needsHumanReview: reviewReasons.length > 0,
@@ -212,6 +252,7 @@ function emptyValue(expectedDocKey) {
     docKeyMismatch: false,
     legible: true,
     fields: [],
+    tradelines: [],
     minFieldConfidence: null,
     notes: null,
     needsHumanReview: true,
@@ -256,6 +297,41 @@ function validateField(f, allowed) {
       page: Number.isInteger(f.page) && f.page > 0 ? f.page : null,
     },
   }
+}
+
+/**
+ * One tradeline. Same rules as a field — closed shape, mandatory confidence, no SSNs, no
+ * instructions — because a list is exactly where an unvalidated object would hide.
+ */
+function validateTradeline(tl) {
+  if (!isPlainObject(tl)) return { ok: false, reason: 'not_an_object' }
+
+  const confidence = confidenceOf(tl.confidence)
+  if (confidence === null) return { ok: false, reason: 'missing_confidence' }
+
+  // Without a creditor there is nothing to compare against the application, and an entry that
+  // cannot be matched cannot become "undisclosed" — it would only ever be noise in the queue.
+  const creditorName = text(tl.creditorName, 120)
+  if (!creditorName) return { ok: false, reason: 'missing_creditor' }
+  if (looksLikeInjection(creditorName) || SSN_LIKE.test(creditorName)) {
+    return { ok: false, reason: 'unsafe_creditor' }
+  }
+
+  const out = { creditorName, confidence }
+  for (const [name, kind] of Object.entries(TRADELINE_FIELDS)) {
+    if (name === 'creditorName') continue
+    const raw = tl[name]
+    if (raw == null || raw === '') continue
+    if (typeof raw === 'object') return { ok: false, reason: `${name}_not_scalar` }
+    if (SSN_LIKE.test(String(raw)) || looksLikeInjection(String(raw))) {
+      return { ok: false, reason: `unsafe_${name}` }
+    }
+    const c = coerce(kind, raw)
+    // A single unreadable column does not discard the tradeline: a creditor and a payment are
+    // enough to ask "why is this not on the application?", which is the entire point of it.
+    if (c.ok) out[name] = c.value
+  }
+  return { ok: true, value: out }
 }
 
 function confidenceOf(c) {
@@ -377,6 +453,25 @@ export function toEvidence(validated, opts = {}) {
   return v.fields.map((f) => evidence(v.docKey, f.name, f.value, f.confidence, opts.documentId))
 }
 
+/**
+ * The tradelines in the shape `undisclosedLiabilities` reads them — the seam between what the
+ * credit report says and the question "why is this not on the application?".
+ *
+ * Only a credit report can produce these; anything else returns nothing rather than an empty
+ * list that reads as "we checked and found none".
+ */
+export function toCreditLiabilities(validatedList, opts = {}) {
+  const out = []
+  for (const raw of Array.isArray(validatedList) ? validatedList : [validatedList]) {
+    const v = unwrap(raw)
+    if (!v || v.docKey !== 'credit_report') continue
+    for (const t of v.tradelines || []) {
+      out.push({ ...t, documentId: opts.documentId ?? v.documentId ?? undefined })
+    }
+  }
+  return out
+}
+
 /** Group parts by doc_key for missingForFile/documentReadiness. */
 export function groupParts(validatedList) {
   const byType = {}
@@ -418,6 +513,25 @@ export const EXTRACTION_RESPONSE_SCHEMA = Object.freeze({
           confidence: { type: 'number', minimum: 0, maximum: 1 },
           rawText: { type: ['string', 'null'], maxLength: MAX_TEXT },
           page: { type: ['integer', 'null'] },
+        },
+      },
+    },
+    tradelines: {
+      type: 'array',
+      maxItems: MAX_TRADELINES,
+      description: 'Credit reports only. One entry per open account. Omit entirely for every other document type.',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['creditorName', 'confidence'],
+        properties: {
+          creditorName: { type: 'string' },
+          accountType: { type: ['string', 'null'] },
+          accountLast4: { type: ['string', 'null'] },
+          monthlyPayment: { type: ['number', 'null'] },
+          balance: { type: ['number', 'null'] },
+          status: { type: ['string', 'null'] },
+          confidence: { type: 'number', minimum: 0, maximum: 1 },
         },
       },
     },

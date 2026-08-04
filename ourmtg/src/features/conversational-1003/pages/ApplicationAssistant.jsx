@@ -34,6 +34,8 @@ import AttestationPanel from '../components/AttestationPanel'
 import {
   getSession, sendTurn, confirmValues, saveSecureField, newIdempotencyKey,
 } from '../api'
+import CreditAuthorization from '../../pre-underwriting/components/CreditAuthorization'
+import { preUnderwritingEnabled } from '../../pre-underwriting/clientFlag'
 
 const COPY = {
   title: { en: 'Your application', es: 'Su solicitud', ru: 'Ваша заявка' },
@@ -291,6 +293,13 @@ export default function ApplicationAssistant({ assist = false }) {
       )}
 
       {assisting && session?.progress?.openCount === 0 && <AssistHandoff loanFileId={loanFileId} session={session} />}
+
+      {/* Credit permission. Borrower side only — the component returns null for the team, and
+          the endpoint refuses them outright. Placed before attestation because the credit pull
+          usually happens while the application is still being finished, not after it. */}
+      {!assisting && preUnderwritingEnabled() && (
+        <CreditAuthorization loanFileId={loanFileId} locale={locale} />
+      )}
 
       {!assisting && session?.canAttest && (
         <AttestationPanel

@@ -47,7 +47,8 @@ for f in \
   "${ROOT}/supabase/delta/002_statement_income_analysis.sql" \
   "${ROOT}/supabase/delta/003_conversational_1003.sql" \
   "${ROOT}/supabase/delta/004_protect_loan_files.sql" \
-  "${ROOT}/supabase/delta/005_team_assisted_application.sql"
+  "${ROOT}/supabase/delta/005_team_assisted_application.sql" \
+  "${ROOT}/supabase/delta/006_pre_underwriting.sql"
 do
   name="$(basename "$f")"
   if psql -v ON_ERROR_STOP=1 -q "$DB" -f "$f" >/dev/null 2>/tmp/rehearsal_err; then
@@ -167,6 +168,61 @@ psql -v ON_ERROR_STOP=1 -q "$DB" -f "${ROOT}/supabase/delta/005_team_assisted_ap
 CHK="$(scalar "select count(*) from pg_constraint where conrelid='public.application_turns'::regclass and conname='application_turns_taken_via_check';")"
 [ "$CHK" = "1" ] && ok "re-running left exactly one check constraint" || bad "constraints stacked: $CHK"
 
+# Delta 006 — pre-underwriting storage. The unique index is the load-bearing part: a re-run must
+# replace a finding, not stack another copy of the same sentence in the reviewer's queue.
+echo "== pre-underwriting storage (delta 006) =="
+PU006=$(scalar "select jsonb_build_object(
+  'n', (select count(*) from information_schema.tables where table_schema='public'
+        and table_name in ('document_extractions','pre_underwriting_findings','credit_authorizations')),
+  'rls', (select bool_and(relrowsecurity) from pg_class where oid in (
+            'public.document_extractions'::regclass,'public.pre_underwriting_findings'::regclass,
+            'public.credit_authorizations'::regclass)),
+  'browser', (select count(*) from information_schema.role_table_grants
+              where table_schema='public' and grantee in ('anon','authenticated')
+              and table_name in ('document_extractions','pre_underwriting_findings','credit_authorizations')))")
+[ "$(echo "$PU006" | grep -o '"n": 3')" ] && ok "all three pre-underwriting tables created" || bad "tables: $PU006"
+[ "$(echo "$PU006" | grep -o '"rls": true')" ] && ok "RLS on all three" || bad "RLS: $PU006"
+[ "$(echo "$PU006" | grep -o '"browser": 0')" ] && ok "browser has no access to findings" || bad "grants: $PU006"
+
+psql -q "$DB" >/dev/null 2>&1 <<SQL
+insert into pre_underwriting_findings (loan_file_id,rule,category,severity,explanation,min_confidence)
+  values ('${LF}','income_consistency','income','high','periods differ',0.82);
+SQL
+rejects "a rule cannot fire twice on one file while both are live" \
+  "insert into pre_underwriting_findings (loan_file_id,rule,category,severity,explanation)
+   values ('${LF}','income_consistency','income','low','again');" "duplicate key value"
+rejects "a finding category is a closed vocabulary" \
+  "insert into pre_underwriting_findings (loan_file_id,rule,category,severity,explanation)
+   values ('${LF}','r2','vibes','low','x');" "violates check constraint"
+rejects "nothing in this schema can express an approval" \
+  "insert into pre_underwriting_findings (loan_file_id,rule,category,severity,explanation,status)
+   values ('${LF}','r3','income','low','x','approved');" "violates check constraint"
+rejects "a resolution must say who decided, and when" \
+  "insert into pre_underwriting_findings (loan_file_id,rule,category,severity,explanation,status)
+   values ('${LF}','r4','income','low','x','dismissed');" "violates check constraint"
+psql -q "$DB" -c "update pre_underwriting_findings set superseded_by=id where rule='income_consistency';" >/dev/null 2>&1
+RERUN="$(psql -qtA "$DB" -c "insert into pre_underwriting_findings (loan_file_id,rule,category,severity,explanation)
+   values ('${LF}','income_consistency','income','high','re-run') returning 1;" 2>&1)"
+[ "$RERUN" = "1" ] && ok "superseding frees the rule to fire again" || bad "re-run blocked: $RERUN"
+rejects "an extraction confidence must be 0..1" \
+  "insert into document_extractions (loan_file_id,document_id,doc_key_confidence)
+   values ('${LF}','00000000-0000-4000-8000-000000000111',5.0);" "violates"
+
+# Credit authorization. Under the FCRA this record IS the permissible purpose, so the shape of it
+# has to hold up a year later, not merely be present.
+rejects "acceptance cannot precede presentation" \
+  "insert into credit_authorizations (loan_file_id,document_version,presented_at,accepted_at)
+   values ('${LF}','v1','2026-08-01T10:00:00Z','2026-08-01T09:00:00Z');" "violates check constraint"
+rejects "a third party cannot authorize" \
+  "insert into credit_authorizations (loan_file_id,party_index,document_version,presented_at,accepted_at)
+   values ('${LF}',7,'v1','2026-08-01T09:00:00Z','2026-08-01T10:00:00Z');" "violates check constraint"
+AUTH_OK="$(psql -qtA "$DB" -c "insert into credit_authorizations
+   (loan_file_id,party_index,document_version,presented_at,accepted_at,accepted_by)
+   values ('${LF}',0,'2026.08.credit.1','2026-08-01T09:00:00Z','2026-08-01T09:00:30Z','${LO}')
+   returning 1;" 2>&1)"
+[ "$AUTH_OK" = "1" ] && ok "a borrower's authorization is recorded with what they were shown" \
+  || bad "authorization insert failed: $AUTH_OK"
+
 echo "== cascade =="
 psql -q "$DB" -c "delete from loan_files where id='${LF}';" >/dev/null
 LEFT=$(scalar "select (select count(*) from mortgage_applications)+(select count(*) from application_parties)
@@ -175,7 +231,8 @@ LEFT=$(scalar "select (select count(*) from mortgage_applications)+(select count
 
 echo "== rollback =="
 if psql -v ON_ERROR_STOP=1 -q "$DB" -c "begin;
-  drop table application_attestations, application_secure_fields, application_turns,
+  drop table credit_authorizations, pre_underwriting_findings, document_extractions,
+             application_attestations, application_secure_fields, application_turns,
              application_field_state, application_field_events, application_parties,
              mortgage_applications; commit;" >/dev/null 2>&1
   then ok "rollback drops cleanly in dependency order"; else bad "rollback failed"; fi
