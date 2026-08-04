@@ -66,6 +66,12 @@ export const reanalyse = (loanFileId) =>
     body: { loanFileId, action: 'reanalyse', idempotencyKey: newKey('reanalyse') },
   })
 
+export const importLiabilities = (loanFileId) =>
+  call('pre-underwriting-review', {
+    method: 'POST',
+    body: { loanFileId, action: 'import_liabilities', idempotencyKey: newKey('import') },
+  })
+
 export const getCreditAuthorization = (loanFileId) =>
   call(`credit-authorization?loanFileId=${encodeURIComponent(loanFileId)}`)
 

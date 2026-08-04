@@ -31,7 +31,13 @@ export default function CreditAuthorization({ loanFileId, locale = 'en', onAutho
           presentedAt.current = new Date().toISOString()
         }
       })
-      .catch((e) => alive && setError(e.message))
+      .catch((e) => {
+        if (!alive) return
+        // The server flag off means this feature does not exist yet — that is a configuration
+        // state, not an error the borrower should read mid-interview. Render nothing.
+        if (e.status === 404) return
+        setError(e.message)
+      })
     return () => { alive = false }
   }, [loanFileId])
 

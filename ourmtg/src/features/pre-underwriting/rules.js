@@ -34,6 +34,8 @@ const date = (v) => {
 }
 const monthsBetween = (later, earlier) => (later - earlier) / (30.44 * 86_400_000)
 const norm = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+// First two words of the creditor's name — shared shape with creditImport.js's reconciler.
+const creditorKey = (name) => norm(name).split(' ').filter(Boolean).slice(0, 2).join(' ')
 
 /** Relative difference between two positive numbers, 0–1. */
 const spread = (a, b) => Math.abs(a - b) / Math.max(a, b)
@@ -283,12 +285,18 @@ export function propertyConsistency(ctx) {
 // Rule: an obligation on the credit report that the application does not mention
 // ─────────────────────────────────────────────────────────────────────────────
 export function undisclosedLiabilities(ctx) {
-  const declared = new Set((ctx.application?.liabilities || []).map((l) => norm(l.creditorName)))
+  // Matching MUST be the same relaxed key the import reconciler uses (creditImport.js), or the
+  // two disagree about the same pair of documents: the reconciler matches "Chase Card" to
+  // "Chase Card Services" while this rule, comparing full names, reports it undisclosed. One
+  // definition of "the same creditor", not two that drift.
+  const declared = new Set(
+    (ctx.application?.liabilities || []).map((l) => creditorKey(l.creditorName)).filter(Boolean),
+  )
   return (ctx.creditLiabilities || [])
     .filter((l) => num(l.monthlyPayment) > 0)
-    .filter((l) => !declared.has(norm(l.creditorName)))
+    .filter((l) => !declared.has(creditorKey(l.creditorName)))
     .map((l) => finding({
-      id: ctx.id?.(`undisclosed_liability:${norm(l.creditorName)}`),
+      id: ctx.id?.(`undisclosed_liability:${creditorKey(l.creditorName)}`),
       rule: 'undisclosed_liability',
       category: 'liabilities',
       severity: num(l.monthlyPayment) >= 300 ? 'high' : 'medium',

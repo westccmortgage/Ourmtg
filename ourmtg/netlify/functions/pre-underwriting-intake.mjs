@@ -36,6 +36,7 @@ import {
   findingIds, newId,
 } from './_lib/preUnderwritingRepo.mjs'
 import { buildAnalysisContext } from '../../src/features/pre-underwriting/analysisContext.js'
+import { applicationFactsFromState } from '../../src/features/pre-underwriting/applicationFacts.js'
 import { runRules } from '../../src/features/pre-underwriting/rules.js'
 
 // Reading a document is a model call against a whole PDF — far more expensive than a turn, and
@@ -128,7 +129,10 @@ export default async (req) => {
     // ── 5 + 6: re-analyse the whole file ───────────────────────────────────
     // Whole file, not just this document: a new pay stub can contradict a W-2 that was already
     // on file, and a rule that only ever saw one document at a time would never notice.
-    const analysis = await reanalyse(svc, { loanFile, correlationId })
+    // The borrower's own answers ride along — without them undisclosedLiabilities compares the
+    // report against nothing and calls every declared debt undisclosed.
+    const application = await applicationFactsForFile(svc, loanFile)
+    const analysis = await reanalyse(svc, { loanFile, application, correlationId })
 
     await logAccess(svc, {
       portalUser: auth.user.id, loanFileId: loanFile.id,
@@ -166,6 +170,23 @@ export default async (req) => {
  * Exported so the review endpoint can do the same thing after a correction — one definition of
  * "analyse this file", not two that drift.
  */
+/** The borrower's 1003 answers for this file, or {} when no application exists yet. */
+export async function applicationFactsForFile(svc, loanFile) {
+  const { data: app } = await svc
+    .from('mortgage_applications')
+    .select('id')
+    .eq('loan_file_id', loanFile.id)
+    .order('application_version', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (!app) return {}
+  const { data: state } = await svc
+    .from('application_field_state')
+    .select('field_path, normalized_value, status')
+    .eq('application_id', app.id)
+  return applicationFactsFromState(state || [])
+}
+
 export async function reanalyse(svc, { loanFile, application = {}, correlationId }) {
   const extractions = await listExtractions(svc, loanFile.id)
   const ctx = buildAnalysisContext({

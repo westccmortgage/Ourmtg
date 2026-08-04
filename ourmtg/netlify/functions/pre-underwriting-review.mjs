@@ -19,7 +19,7 @@
 
 import { admin, isConfigured } from './_lib/supabase.mjs'
 import {
-  authUser, json, preflight, loadLoanFile, resolveAccess, isInternal, logAccess, ipOf, uaOf,
+  authUser, json, preflight, loadLoanFile, resolveAccess, isInternal, logAccess,
 } from './_lib/portal.mjs'
 import { readJsonBody, isUuid, isEnum, boundedString } from './_lib/requestGuard.mjs'
 import { isValidIdempotencyKey } from './_lib/idempotency.mjs'
@@ -29,7 +29,8 @@ import {
   listExtractions, listFindings, listAuthorizations, listDocuments, newId,
 } from './_lib/preUnderwritingRepo.mjs'
 import { reanalyse, NOT_MEANING } from './pre-underwriting-intake.mjs'
-import { buildAnalysisContext, checklistFor } from '../../src/features/pre-underwriting/analysisContext.js'
+import { buildAnalysisContext } from '../../src/features/pre-underwriting/analysisContext.js'
+import { preUnderwritingChecklist } from './_lib/checklist.mjs'
 import { groupParts } from '../../src/features/pre-underwriting/extractionContract.js'
 import { loanReadiness, borrowerRequests } from '../../src/features/pre-underwriting/readiness.js'
 import { programFit } from '../../src/features/pre-underwriting/programFit.js'
@@ -38,8 +39,17 @@ import {
   creditPullAllowed, authorizationGap, CREDIT_AUTHORIZATION, CREDIT_AUTH_VERSION,
 } from '../../src/features/pre-underwriting/creditAuthorization.js'
 import { getDocumentType } from '../../src/features/pre-underwriting/documentCatalog.js'
+import {
+  reconcile, planLiabilityImport, declaredLiabilities,
+} from '../../src/features/pre-underwriting/creditImport.js'
+import { applicationFactsFromState } from '../../src/features/pre-underwriting/applicationFacts.js'
+import { toCreditLiabilities } from '../../src/features/pre-underwriting/extractionContract.js'
+import {
+  ensureApplication, ensurePartyByIndex, listParties, loadState, persistEvents, syncProjection,
+} from './_lib/applicationRepo.mjs'
+import { recordValue } from '../../src/features/conversational-1003/applicationReducer.js'
 
-const ACTIONS = ['confirm', 'correct', 'dismiss', 'reanalyse']
+const ACTIONS = ['confirm', 'correct', 'dismiss', 'reanalyse', 'import_liabilities']
 
 export default async (req) => {
   if (req.method === 'OPTIONS') return preflight()
@@ -92,6 +102,18 @@ export default async (req) => {
       await logAccess(svc, {
         portalUser: auth.user.id, loanFileId: loanFile.id,
         action: 'pre_underwriting_reanalyse', target: correlationId, req,
+      })
+      return json({ ok: true, result, ...(await panel(svc, { loanFile, req, auth })) })
+    }
+
+    if (action === 'import_liabilities') {
+      const result = await importLiabilities(svc, { loanFile, actor: auth.user.id, correlationId })
+      if (!result.ok) return json({ ok: false, error: result.error }, result.status || 409)
+      // The application changed, so what counts as "undisclosed" changed with it.
+      await reanalyse(svc, { loanFile, application: await applicationFacts(svc, loanFile), correlationId })
+      await logAccess(svc, {
+        portalUser: auth.user.id, loanFileId: loanFile.id,
+        action: 'pre_underwriting_import_liabilities', target: String(result.imported.length), req,
       })
       return json({ ok: true, result, ...(await panel(svc, { loanFile, req, auth })) })
     }
@@ -170,11 +192,11 @@ async function panel(svc, { loanFile, req, auth }) {
 
   const application = await applicationFacts(svc, loanFile)
   const ctx = buildAnalysisContext({ extractions, application })
-  const checklist = checklistFor({
-    purpose: loanFile.loan_purpose || loanFile.purpose,
-    program: loanFile.program,
-    selfEmployed: application.selfEmployed,
-    hasRentalIncome: application.hasRentalIncome,
+  // The exact checklist the borrower's portal renders, from the file's own loan type and
+  // purpose — not a parallel one that can disagree with it.
+  const checklist = preUnderwritingChecklist({
+    loanType: loanFile.loan_type,
+    purpose: loanFile.purpose,
   })
   const byType = groupParts(extractions)
 
@@ -189,6 +211,31 @@ async function panel(svc, { loanFile, req, auth }) {
 
   const credit = creditPullAllowed(authorizations)
   const creditGap = authorizationGap({ authorizations })
+
+  // Credit ↔ application reconciliation. The panel shows what would be imported BEFORE the
+  // button is pressed — writing into an application is not a side effect a person discovers.
+  const declared = application.liabilities || []
+  const tradelines = ctx.creditLiabilities
+  const liabilitySync = tradelines.length ? (() => {
+    const rec = reconcile(tradelines, declared)
+    const importable = rec.onlyOnCredit.filter((r) => !r.skip)
+    return {
+      matched: rec.matched.length,
+      disagreeing: rec.matched.filter((m) => m.differs).map((m) => ({
+        creditorName: m.tradeline.creditorName, differs: m.differs,
+      })),
+      toImport: importable.map((r) => ({
+        creditorName: r.tradeline.creditorName,
+        monthlyPayment: r.tradeline.monthlyPayment ?? null,
+        balance: r.tradeline.balance ?? null,
+        needsPayment: Boolean(r.needsPayment),
+      })),
+      skipped: rec.onlyOnCredit.filter((r) => r.skip).map((r) => ({
+        creditorName: r.tradeline.creditorName, reason: r.reason,
+      })),
+      onlyOnApplication: rec.onlyOnApplication.map((d) => ({ creditorName: d.creditorName })),
+    }
+  })() : null
 
   // Documents uploaded but never read. Named explicitly: silently omitting them would make the
   // panel claim a completeness it has not actually checked.
@@ -238,6 +285,7 @@ async function panel(svc, { loanFile, req, auth }) {
       // accept, rather than describing it secondhand.
       text: CREDIT_AUTHORIZATION,
     },
+    liabilitySync,
     unread,
     extractions: extractions.map((e) => ({
       id: e.id, documentId: e.documentId, docKey: e.docKey, proposedDocKey: e.proposedDocKey,
@@ -276,20 +324,77 @@ async function applicationFacts(svc, loanFile) {
     .from('application_field_state')
     .select('field_path, normalized_value, status')
     .eq('application_id', app.id)
-  const value = (path) => {
-    const row = (state || []).find((s) => s.field_path === path)
-    const v = row?.normalized_value
-    return v && typeof v === 'object' && 'value' in v ? v.value : v
+  return applicationFactsFromState(state || [])
+}
+
+
+/**
+ * Execute the liability import for one file: plan from what was read, write through the SAME
+ * reducer the interview uses, as source 'imported_credit'.
+ *
+ * Writing through the reducer is the entire safety story: the catalog validates every path, the
+ * normalizer validates every value, and the event log records that these rows came from a
+ * credit report and not from the borrower's own mouth. The borrower will still see and confirm
+ * them — importing fills the form in, it does not answer for anyone.
+ */
+async function importLiabilities(svc, { loanFile, actor, correlationId }) {
+  const extractions = await listExtractions(svc, loanFile.id)
+  const ctx = buildAnalysisContext({ extractions })
+  const tradelines = ctx.creditLiabilities
+  if (!tradelines.length) {
+    return { ok: false, status: 409, error: 'No credit report has been read on this file yet.' }
   }
 
-  return {
-    monthlyIncome: value('parties[0].income.monthlyEquivalent') ?? value('parties[0].income.amount'),
-    employmentStartDate: value('parties[0].employment.startDate'),
-    selfEmployed: value('parties[0].employment.selfEmployed') === true,
-    loanAmount: value('loan.amount'),
-    veteran: value('parties[0].militaryService'),
-    liabilities: [],
+  const application = await ensureApplication(svc, { loanFile, createdBy: actor })
+  if (['borrower_attested', 'accepted_into_loan_file'].includes(application.status)) {
+    // After attestation the application is the borrower's sworn statement; changing it re-opens
+    // it, and that is the return_to_borrower flow, not a silent import.
+    return { ok: false, status: 409, error: 'The application has been submitted. Return it to the borrower before importing.' }
   }
+  const party = await ensurePartyByIndex(svc, { application, loanFile, partyIndex: 0 })
+  const parties = await listParties(svc, application.id)
+  let state = await loadState(svc, { application, partyCount: Math.max(1, parties.length) })
+
+  const declared = declaredLiabilities(
+    Object.entries(state.fields).map(([field_path, v]) => ({ field_path, normalized_value: { value: v.normalized_value } })),
+    0,
+  )
+  // Next free index: one past the highest liabilities[] slot that has any recorded field.
+  const nextIndex = Object.keys(state.fields).reduce((n, path) => {
+    const m = /^parties\[0\]\.liabilities\[(\d+)\]\./.exec(path)
+    return m ? Math.max(n, Number(m[1]) + 1) : n
+  }, 0)
+
+  const plan = planLiabilityImport({ tradelines, declared, partyIndex: 0, nextIndex })
+  if (!plan.writes.length) {
+    return { ok: true, imported: [], skipped: plan.skipped, needsPayment: [], note: 'Everything on the report is already on the application.' }
+  }
+
+  const at = new Date().toISOString()
+  const before = state.events.length
+  const failed = []
+  for (const w of plan.writes) {
+    const r = recordValue(state, {
+      path: w.path, rawValue: w.value, source: 'imported_credit',
+      at, eventId: newId(), actor,
+    })
+    if (r.outcome === 'rejected') { failed.push({ path: w.path, reason: r.reason }); continue }
+    state = r.state
+  }
+
+  const newEvents = state.events.slice(before)
+  if (newEvents.length) {
+    await persistEvents(svc, { application, party, loanFile, events: newEvents, turnId: null })
+    await syncProjection(svc, {
+      application, party, loanFile, state, paths: newEvents.map((e) => e.field_path),
+    })
+  }
+  logEvent('pu.import.liabilities', {
+    severity: 'info', requestId: correlationId,
+    imported: plan.imported.length, skipped: plan.skipped.length,
+    needsPayment: plan.needsPayment.length, rejected: failed.length,
+  })
+  return { ok: true, imported: plan.imported, skipped: plan.skipped, needsPayment: plan.needsPayment, rejected: failed }
 }
 
 /** Corrected values, bounded and scalar. A free-form object here would be an unvalidated write. */

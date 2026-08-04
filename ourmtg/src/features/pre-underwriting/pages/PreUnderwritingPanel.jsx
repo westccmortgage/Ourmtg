@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { Alert } from '../../../components/ui'
-import { getPanel, resolveFinding, reanalyse, readDocument } from '../api'
+import { getPanel, resolveFinding, reanalyse, readDocument, importLiabilities } from '../api'
 
 const SEVERITY_CHIP = { high: 'chip red', medium: 'chip amber', low: 'chip gray' }
 const CATEGORY_LABEL = {
@@ -45,7 +45,7 @@ export default function PreUnderwritingPanel() {
   if (error && !data) return <Alert kind="error">{error}</Alert>
   if (!data) return <p className="muted">Reading the file…</p>
 
-  const { readiness, missing, findings, programs, credit, unread, facts } = data
+  const { readiness, missing, findings, programs, credit, unread, facts, liabilitySync } = data
   const open = findings.filter((f) => f.status === 'pending_review')
   const decided = findings.filter((f) => f.status !== 'pending_review')
 
@@ -128,6 +128,82 @@ export default function PreUnderwritingPanel() {
           </>
         )}
       </div>
+
+      {/* ── Credit ↔ 1003 ─────────────────────────────────────────────────── */}
+      {liabilitySync && (
+        <div className="card">
+          <div className="card-head">
+            <h2>Credit report → application</h2>
+            {liabilitySync.toImport.length > 0
+              ? <span className="chip amber">{liabilitySync.toImport.length} to add</span>
+              : <span className="chip green">In sync</span>}
+          </div>
+          <p className="muted" style={{ marginTop: 0, fontSize: 13.5 }}>
+            {liabilitySync.matched} obligation{liabilitySync.matched === 1 ? '' : 's'} on the report
+            already on the application.
+          </p>
+
+          {/* Everything the button would do, listed before it is pressed. Writing into somebody's
+              application is not a side effect a person discovers afterwards. */}
+          {liabilitySync.toImport.length > 0 && (
+            <>
+              {liabilitySync.toImport.map((t) => (
+                <div key={t.creditorName} className="row" style={{ display: 'block' }}>
+                  <div className="spread">
+                    <div className="rlabel">{t.creditorName}</div>
+                    <div>
+                      {t.monthlyPayment != null && <strong>${Math.round(t.monthlyPayment).toLocaleString('en-US')}/mo</strong>}
+                      {t.needsPayment && <span className="chip amber" style={{ marginLeft: 6 }}>payment TBD</span>}
+                    </div>
+                  </div>
+                  {t.needsPayment && (
+                    <p className="mb0 hint">
+                      Deferred — the report shows no payment against a balance. Imported at $0 and
+                      flagged; a payment has to be established before the ratios are right.
+                    </p>
+                  )}
+                </div>
+              ))}
+              <button type="button" className="btn btn-primary btn-sm" disabled={busy === 'import'}
+                onClick={() => act(() => importLiabilities(loanFileId), 'import')}>
+                {busy === 'import' ? 'Adding…' : `Add ${liabilitySync.toImport.length} to the application`}
+              </button>
+              <p className="hint" style={{ marginTop: 8 }}>
+                Recorded as imported from credit, not as the borrower's own words — they will see
+                and confirm each one before they attest.
+              </p>
+            </>
+          )}
+
+          {liabilitySync.disagreeing.length > 0 && (
+            <details style={{ marginTop: 10 }}>
+              <summary className="muted">Same account, different numbers ({liabilitySync.disagreeing.length})</summary>
+              {liabilitySync.disagreeing.map((d) => (
+                <div key={d.creditorName} className="row" style={{ display: 'block' }}>
+                  <div className="rlabel">{d.creditorName}</div>
+                  {d.differs.map((x) => (
+                    <p key={x.field} className="mb0 muted" style={{ fontSize: 13 }}>
+                      {x.field}: report says {fmt(x.credit)}, application says {fmt(x.application)}
+                    </p>
+                  ))}
+                </div>
+              ))}
+            </details>
+          )}
+
+          {liabilitySync.onlyOnApplication.length > 0 && (
+            <p className="hint" style={{ marginTop: 10 }}>
+              On the application but not on the report ({liabilitySync.onlyOnApplication.map((d) => d.creditorName).join(', ')}) —
+              normal for family loans and support obligations; they still count.
+            </p>
+          )}
+          {liabilitySync.skipped.length > 0 && (
+            <p className="hint mb0">
+              Not imported: {liabilitySync.skipped.map((x) => `${x.creditorName} (${x.reason})`).join('; ')}.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* ── Missing ───────────────────────────────────────────────────────── */}
       <div className="card">
@@ -279,6 +355,8 @@ function Fact({ label, value, basis, money, pct, warn }) {
     </div>
   )
 }
+
+const fmt = (n) => (typeof n === 'number' ? `$${Math.round(n).toLocaleString('en-US')}` : String(n))
 
 function Metric({ label, v, extra }) {
   return (

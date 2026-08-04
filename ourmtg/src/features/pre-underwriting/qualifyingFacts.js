@@ -210,7 +210,9 @@ export function qualifyingFacts(ctx = {}, application = {}) {
   const contract = documents.purchase_contract?.[0] || {}
   const ltv = loanToValue({
     loanAmount: application.loanAmount,
-    purchasePrice: contract.purchasePrice,
+    // The signed contract is authoritative; the borrower's own stated price serves until one is
+    // read, so LTV does not sit at "not computable" for the whole early life of the file.
+    purchasePrice: contract.purchasePrice ?? application.purchasePrice,
     appraisedValue: application.appraisedValue,
   })
 

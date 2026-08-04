@@ -85,6 +85,24 @@ that perform them stay separate actions, as `loan_files.preapproval_*` already i
 | Numbers are null rather than estimated | `qualifyingFacts.js` — every figure returns null with a reason when an input is missing |
 | The credit score is the middle of three | `representativeScore` — averaging qualifies people who do not qualify |
 
+### Credit liabilities flow into the 1003 — planned, shown, then written
+
+Added 2026-08-04. Every obligation on the report must end up in section 2c, because that is what
+the ratios are computed from and what the borrower attests to. The import:
+
+- **reconciles first** — a declared debt is matched (by last-four, then by creditor name), never
+  duplicated, never called undisclosed; the undisclosed rule and the reconciler share one
+  definition of "the same creditor"
+- **filters what does not belong** — a closed account with no balance is history, not a liability
+- **never drops a deferred debt** — a $0 payment against a balance imports at $0 and is flagged
+  "payment to be established"; silently dropping it makes a $60k student loan cost nothing
+- **never carries the account number** — it is a matching key, and `liabilities[].accountNumber`
+  stays a secure field with its own control
+- **writes through the same reducer as the interview**, as source `imported_credit`, landing as
+  `candidate` — the borrower still sees and confirms every imported row before they attest
+- **is a button, not a side effect** — the panel lists exactly what would be written before
+  anyone presses it, and an attested application refuses the import outright
+
 ## Still open
 
 - **The credit authorization wording is a draft** (`reviewed: false`). It has to pass a compliance

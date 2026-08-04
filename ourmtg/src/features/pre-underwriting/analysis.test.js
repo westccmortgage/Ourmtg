@@ -3,7 +3,8 @@
 // four separate files goes wrong when it is finally connected.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildAnalysisContext, newestPerDocument, checklistFor } from './analysisContext.js'
+import { buildAnalysisContext, newestPerDocument } from './analysisContext.js'
+import { preUnderwritingChecklist } from '../../../netlify/functions/_lib/checklist.mjs'
 import { validateExtractionResponse } from './extractionContract.js'
 import { runRules } from './rules.js'
 import { loanReadiness, borrowerRequests } from './readiness.js'
@@ -12,6 +13,7 @@ import {
   representativeScore, fileScore, qualifyingIncome, monthlyDebt, debtToIncome, loanToValue,
   qualifyingFacts,
 } from './qualifyingFacts.js'
+import { getDocumentType } from './documentCatalog.js'
 import {
   creditPullAllowed, validateAcceptance, authorizationGap,
   CREDIT_AUTH_VERSION, CREDIT_AUTHORIZATION, AUTHORIZATION_VALID_DAYS,
@@ -122,35 +124,36 @@ test('the whole chain runs: read → context → rule → finding with evidence'
 
 // ── the checklist ───────────────────────────────────────────────────────────
 
-test('the checklist follows the loan, not a fixed list', () => {
-  const purchase = checklistFor({ purpose: 'purchase' }).map((c) => c.docKey)
+test('the panel checklist is the borrower checklist plus what only the team can get', () => {
+  // One checklist, two views — a second checklist in the analysis code meant the panel could say
+  // "missing X" while the borrower's portal said "missing Y" about the same file.
+  const purchase = preUnderwritingChecklist({ loanType: 'Conventional', purpose: 'purchase' }).map((c) => c.docKey)
   assert.ok(purchase.includes('purchase_contract'))
+  assert.ok(purchase.includes('paystubs_30d'))
   assert.ok(!purchase.includes('mortgage_statement'))
 
-  const refi = checklistFor({ purpose: 'refinance' }).map((c) => c.docKey)
+  const refi = preUnderwritingChecklist({ loanType: 'Conventional', purpose: 'refinance' }).map((c) => c.docKey)
   assert.ok(refi.includes('mortgage_statement'))
   assert.ok(refi.includes('hoi_dec'))
   assert.ok(!refi.includes('purchase_contract'))
 
-  // Asking a W-2 employee for a business licence is how a file stalls on an irrelevance.
-  const employed = checklistFor({ purpose: 'purchase' }).map((c) => c.docKey)
-  assert.ok(employed.includes('paystubs_30d'))
-  assert.ok(!employed.includes('business_lic'))
+  // Bank-statement programs drop the wage-earner documents rather than stall the file on them.
+  const nonQm = preUnderwritingChecklist({ loanType: 'Non-QM', purpose: 'purchase' }).map((c) => c.docKey)
+  assert.ok(nonQm.includes('bank_12mo') && nonQm.includes('business_lic'))
+  assert.ok(!nonQm.includes('paystubs_30d'))
 
-  const selfEmployed = checklistFor({ purpose: 'purchase', selfEmployed: true }).map((c) => c.docKey)
-  assert.ok(selfEmployed.includes('business_lic'))
-  assert.ok(!selfEmployed.includes('paystubs_30d'))
-
-  const va = checklistFor({ purpose: 'purchase', program: 'VA' }).map((c) => c.docKey)
+  const va = preUnderwritingChecklist({ loanType: 'VA', purpose: 'purchase' }).map((c) => c.docKey)
   assert.ok(va.includes('coe') && va.includes('dd214'))
 })
 
-test('every loan needs identity and credit, and no key repeats', () => {
-  for (const loan of [{}, { purpose: 'purchase' }, { purpose: 'refinance', selfEmployed: true, program: 'VA' }]) {
-    const keys = checklistFor(loan).map((c) => c.docKey)
+test('every loan needs identity and credit, and no key repeats, and every key is in the catalog', () => {
+  for (const loan of [{}, { loanType: 'VA', purpose: 'purchase' }, { loanType: 'DSCR', purpose: 'refinance' }, { loanType: 'Jumbo', purpose: 'purchase' }]) {
+    const keys = preUnderwritingChecklist(loan).map((c) => c.docKey)
     assert.ok(keys.includes('id_photo'), JSON.stringify(loan))
     assert.ok(keys.includes('credit_report'), JSON.stringify(loan))
     assert.equal(keys.length, new Set(keys).size, 'a repeated key would double-count in readiness')
+    // A checklist key the document catalog cannot assess silently never completes.
+    for (const k of keys) assert.ok(getDocumentType(k), `${k} is not in the document catalog`)
   }
 })
 
