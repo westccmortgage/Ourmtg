@@ -22,7 +22,9 @@ import ApplicationAssistant from './features/conversational-1003/pages/Applicati
 import ApplicationTeamReview from './features/conversational-1003/pages/ApplicationTeamReview'
 import ShortLink1003 from './pages/ShortLink1003'
 import ApplicationEntry from './pages/ApplicationEntry'
+import PreUnderwritingPanel from './features/pre-underwriting/pages/PreUnderwritingPanel'
 import { conversational1003Enabled } from './features/conversational-1003/clientFlag'
+import { preUnderwritingEnabled } from './features/pre-underwriting/clientFlag'
 
 function NotFound() {
   return (
@@ -74,6 +76,13 @@ export default function App() {
                     come back here afterwards instead of dropping them on the portal. */}
                 <Route path="application" element={<ApplicationEntry />} />
               </>
+            )}
+            {/* Autopilot Pre-Underwriting — default OFF. Findings are internal by definition
+                (docs/OURMTG-PRE-UNDERWRITING-BOUNDARY.md); the functions enforce that server-side
+                regardless of whether this route is mounted. */}
+            {preUnderwritingEnabled() && (
+              <Route path="portal/file/:loanFileId/pre-underwriting"
+                element={<RequireAuth><PreUnderwritingPanel /></RequireAuth>} />
             )}
             <Route path="*" element={<NotFound />} />
           </Route>

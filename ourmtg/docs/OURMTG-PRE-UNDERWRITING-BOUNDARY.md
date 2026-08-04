@@ -21,6 +21,29 @@ and only the reviewed summary reaches the borrower.
 | Calculated qualifying income, DTI, LTV, reserves, cash to close | only after review | yes |
 | Risk findings (large deposits, NSF, undisclosed liabilities, inconsistencies) | no | yes |
 | Program suitability / recommendations | no | yes |
+| Credit score, or anything derived from the credit report | **never, from this system** | yes |
+| Whether they have authorized a credit pull | yes — it is their own consent | yes |
+
+### The credit report is stricter than the rest of the table
+
+Added 2026-08-03, when credit was actually wired in. Everything else above is *withheld pending
+review*; the credit report is different in kind. A borrower learning their score or their
+standing from a page this system rendered is an adverse-action-adjacent disclosure made by the
+wrong party, without the notice that legally attaches to it. So `credit_report` sits in
+`NEVER_ECHOED` alongside `id_photo`, and no reviewed-release path is provided for it.
+
+The consent itself is the exception, and it points the other way: the borrower must see, and
+must be the only one able to give it. `credit-authorization` refuses a POST from the loan team
+including the file's owner. A loan officer taking a 1003 over the phone is ordinary practice; a
+loan officer clicking "I authorize" for someone else is not the same act, and the FCRA's
+permissible purpose does not survive it.
+
+### Who can produce a document is part of the boundary
+
+A credit tri-merge is required, usually missing, and impossible for a consumer to obtain.
+Listing it as a borrower document puts an impossible request in front of them and then waits on
+them for it. `providedBy` in the catalog splits the missing list in two: what the borrower can
+send, and what the loan team has to go get.
 
 ## Why, in plain terms
 
@@ -49,3 +72,27 @@ borrower. "You need a letter explaining the gap in employment" is a request. "Yo
 It may not approve, deny, pre-approve, counteroffer, price, or select a program. It prepares
 findings for a person. Every one of those verbs belongs to a licensed human, and the surfaces
 that perform them stay separate actions, as `loan_files.preapproval_*` already is.
+
+## What was built against this, and where it is enforced
+
+| Rule | Enforced in |
+|---|---|
+| A finding never reaches a borrower | `pre-underwriting-*` are internal-only; endpoint tests assert 403 for borrower and realtor |
+| Nothing can express an approval | no column in delta 006, no action in the review endpoint, asserted in both the rehearsal and the endpoint tests |
+| A dismissal must say why | refused at the endpoint; a resolution with no decider is refused by a check constraint |
+| The score is a file measure, not a person measure | `readiness.js` carries `meaning` / `notMeaning`, rendered next to the number every time |
+| Programs are suitability, not eligibility | `programFit.js` returns the guideline each comparison used and a `notChecked` list; nothing is ruled out on a number nobody has |
+| Numbers are null rather than estimated | `qualifyingFacts.js` — every figure returns null with a reason when an input is missing |
+| The credit score is the middle of three | `representativeScore` — averaging qualifies people who do not qualify |
+
+## Still open
+
+- **The credit authorization wording is a draft** (`reviewed: false`). It has to pass a compliance
+  review before a real borrower reads it. The flag exists so this cannot be forgotten silently.
+- **Adverse action.** Nothing here issues one, and nothing here should. If a file is declined,
+  that notice comes from the lender's own process — this system's job is to have made the
+  reasoning legible, not to send the letter.
+- **Transaction-level bank reads.** `largeDeposits` works today only on deposits a caller has
+  collected; the extraction reads statement totals, not the ledger. An empty deposit list means
+  "we have not looked", never "there is nothing there", and the rule is written so absence
+  produces no finding.

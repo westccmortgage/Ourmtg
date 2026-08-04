@@ -1,6 +1,6 @@
 -- OurMTG Delta 006 — Autopilot Pre-Underwriting: what was read, and what was concluded
 --
--- Two tables, and the line between them is the whole architecture:
+-- Three tables. The line between the first two is the whole architecture:
 --
 --   document_extractions      what Level 2 READ out of a document. Facts with confidences.
 --                             No conclusions. Never a decision.
@@ -8,6 +8,9 @@
 --                             evidence it stands on. Still not a decision — a finding is a
 --                             question put to a person, and the person's answer is recorded
 --                             on the same row.
+--   credit_authorizations     the borrower's permission to pull credit. Not a document and not
+--                             a preference — under the FCRA it is what makes the pull lawful,
+--                             so what is stored is who saw which wording, and when.
 --
 -- Keeping them apart is what makes "why did this appear?" answerable. Collapse them and you
 -- get a single opaque score that nobody can audit, re-check when a document is replaced, or
@@ -170,11 +173,53 @@ alter table public.pre_underwriting_findings
     or (resolved_by is not null and resolved_at is not null)
   );
 
+-- ── Permission to pull credit ───────────────────────────────────────────────
+-- Not a document and not a preference. Under the FCRA a consumer report may only be obtained
+-- for a permissible purpose, and for a mortgage that rests on the consumer having initiated the
+-- transaction and authorized the pull. What is stored is the evidence of that: this person saw
+-- this wording at this moment and accepted it.
+--
+-- Modelled on application_attestations for the same reason — a boolean column proves nothing a
+-- year later, and a year later is when it is asked for.
+create table if not exists public.credit_authorizations (
+  id                uuid primary key default gen_random_uuid(),
+  organization_id   uuid,
+  loan_file_id      uuid not null references public.loan_files(id) on delete cascade,
+  party_index       integer not null default 0 check (party_index in (0, 1)),
+
+  document_version  text not null,
+  presented_at      timestamptz not null,
+  accepted_at       timestamptz not null,
+  accepted_by       uuid references auth.users(id) on delete set null,
+  -- Recorded per the approved privacy policy, exactly as the application attestation does.
+  ip                text,
+  user_agent        text,
+
+  -- A borrower may withdraw permission. There is no UPDATE that erases the original — the
+  -- authorization happened, and the record of it has to keep saying so.
+  revoked_at        timestamptz,
+  revoked_by        uuid references auth.users(id) on delete set null,
+
+  created_at        timestamptz not null default now()
+);
+create index if not exists credit_authorizations_file_idx
+  on public.credit_authorizations(loan_file_id, party_index, accepted_at desc);
+
+alter table public.credit_authorizations enable row level security;
+revoke all privileges on table public.credit_authorizations from anon, authenticated;
+
+-- Acceptance cannot precede presentation. A record claiming someone accepted wording before it
+-- was shown to them is not evidence of consent; it is evidence of a bug.
+alter table public.credit_authorizations
+  drop constraint if exists credit_authorizations_order;
+alter table public.credit_authorizations
+  add constraint credit_authorizations_order check (accepted_at >= presented_at);
+
 commit;
 
 -- ── Verification ────────────────────────────────────────────────────────────
 select case
-         when tables = 2 and rls and browser = 0 and live_rule = 1
+         when tables = 3 and rls and browser = 0 and live_rule = 1
            then 'PASS - pre-underwriting storage created, server-only, one live finding per rule'
          else 'FAIL - tables=' || tables::text || ' rls=' || rls::text
               || ' browser_grants=' || browser::text || ' unique_rule_index=' || live_rule::text
@@ -183,13 +228,16 @@ from (
   select
     (select count(*) from information_schema.tables
       where table_schema = 'public'
-        and table_name in ('document_extractions','pre_underwriting_findings')) as tables,
+        and table_name in ('document_extractions','pre_underwriting_findings',
+                           'credit_authorizations')) as tables,
     (select bool_and(relrowsecurity) from pg_class where oid in (
        'public.document_extractions'::regclass,
-       'public.pre_underwriting_findings'::regclass)) as rls,
+       'public.pre_underwriting_findings'::regclass,
+       'public.credit_authorizations'::regclass)) as rls,
     (select count(*) from information_schema.role_table_grants
       where table_schema = 'public' and grantee in ('anon','authenticated')
-        and table_name in ('document_extractions','pre_underwriting_findings')) as browser,
+        and table_name in ('document_extractions','pre_underwriting_findings',
+                           'credit_authorizations')) as browser,
     (select count(*) from pg_indexes
       where schemaname = 'public'
         and indexname = 'pre_underwriting_findings_live_rule_idx') as live_rule

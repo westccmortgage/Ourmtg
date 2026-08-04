@@ -16,8 +16,16 @@
 
 import { finding, evidence, REVIEW_CONFIDENCE_THRESHOLD } from './findings.js'
 
+// Absence must read as null, never as zero. Number('') is 0, so the obvious one-liner turns a
+// missing income into an income of zero. Every current caller happens to guard with `> 0`, which
+// is exactly the kind of accidental safety that stops being true the next time someone adds a
+// rule — so the hazard is removed here rather than remembered.
 const num = (v) => {
-  const n = typeof v === 'number' ? v : Number(String(v ?? '').replace(/[$,\s]/g, ''))
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null
+  if (typeof v !== 'string') return null
+  const s = v.replace(/[$,\s]/g, '')
+  if (s === '') return null
+  const n = Number(s)
   return Number.isFinite(n) ? n : null
 }
 const date = (v) => {

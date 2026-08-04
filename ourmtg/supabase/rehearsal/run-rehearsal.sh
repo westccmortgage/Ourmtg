@@ -173,14 +173,15 @@ CHK="$(scalar "select count(*) from pg_constraint where conrelid='public.applica
 echo "== pre-underwriting storage (delta 006) =="
 PU006=$(scalar "select jsonb_build_object(
   'n', (select count(*) from information_schema.tables where table_schema='public'
-        and table_name in ('document_extractions','pre_underwriting_findings')),
+        and table_name in ('document_extractions','pre_underwriting_findings','credit_authorizations')),
   'rls', (select bool_and(relrowsecurity) from pg_class where oid in (
-            'public.document_extractions'::regclass,'public.pre_underwriting_findings'::regclass)),
+            'public.document_extractions'::regclass,'public.pre_underwriting_findings'::regclass,
+            'public.credit_authorizations'::regclass)),
   'browser', (select count(*) from information_schema.role_table_grants
               where table_schema='public' and grantee in ('anon','authenticated')
-              and table_name in ('document_extractions','pre_underwriting_findings')))")
-[ "$(echo "$PU006" | grep -o '"n": 2')" ] && ok "both pre-underwriting tables created" || bad "tables: $PU006"
-[ "$(echo "$PU006" | grep -o '"rls": true')" ] && ok "RLS on both" || bad "RLS: $PU006"
+              and table_name in ('document_extractions','pre_underwriting_findings','credit_authorizations')))")
+[ "$(echo "$PU006" | grep -o '"n": 3')" ] && ok "all three pre-underwriting tables created" || bad "tables: $PU006"
+[ "$(echo "$PU006" | grep -o '"rls": true')" ] && ok "RLS on all three" || bad "RLS: $PU006"
 [ "$(echo "$PU006" | grep -o '"browser": 0')" ] && ok "browser has no access to findings" || bad "grants: $PU006"
 
 psql -q "$DB" >/dev/null 2>&1 <<SQL
@@ -207,6 +208,21 @@ rejects "an extraction confidence must be 0..1" \
   "insert into document_extractions (loan_file_id,document_id,doc_key_confidence)
    values ('${LF}','00000000-0000-4000-8000-000000000111',5.0);" "violates"
 
+# Credit authorization. Under the FCRA this record IS the permissible purpose, so the shape of it
+# has to hold up a year later, not merely be present.
+rejects "acceptance cannot precede presentation" \
+  "insert into credit_authorizations (loan_file_id,document_version,presented_at,accepted_at)
+   values ('${LF}','v1','2026-08-01T10:00:00Z','2026-08-01T09:00:00Z');" "violates check constraint"
+rejects "a third party cannot authorize" \
+  "insert into credit_authorizations (loan_file_id,party_index,document_version,presented_at,accepted_at)
+   values ('${LF}',7,'v1','2026-08-01T09:00:00Z','2026-08-01T10:00:00Z');" "violates check constraint"
+AUTH_OK="$(psql -qtA "$DB" -c "insert into credit_authorizations
+   (loan_file_id,party_index,document_version,presented_at,accepted_at,accepted_by)
+   values ('${LF}',0,'2026.08.credit.1','2026-08-01T09:00:00Z','2026-08-01T09:00:30Z','${LO}')
+   returning 1;" 2>&1)"
+[ "$AUTH_OK" = "1" ] && ok "a borrower's authorization is recorded with what they were shown" \
+  || bad "authorization insert failed: $AUTH_OK"
+
 echo "== cascade =="
 psql -q "$DB" -c "delete from loan_files where id='${LF}';" >/dev/null
 LEFT=$(scalar "select (select count(*) from mortgage_applications)+(select count(*) from application_parties)
@@ -215,7 +231,8 @@ LEFT=$(scalar "select (select count(*) from mortgage_applications)+(select count
 
 echo "== rollback =="
 if psql -v ON_ERROR_STOP=1 -q "$DB" -c "begin;
-  drop table application_attestations, application_secure_fields, application_turns,
+  drop table credit_authorizations, pre_underwriting_findings, document_extractions,
+             application_attestations, application_secure_fields, application_turns,
              application_field_state, application_field_events, application_parties,
              mortgage_applications; commit;" >/dev/null 2>&1
   then ok "rollback drops cleanly in dependency order"; else bad "rollback failed"; fi

@@ -16,6 +16,7 @@ import { flag } from '../domain/flags'
 import TeamTaskCard from '../components/TeamTaskCard'
 import StatementIncomePanel from '../components/StatementIncomePanel'
 import { conversational1003Enabled } from '../features/conversational-1003/clientFlag'
+import { preUnderwritingEnabled } from '../features/pre-underwriting/clientFlag'
 import TeamDocUpload from '../components/TeamDocUpload'
 
 function DocRow({ doc, onReview }) {
@@ -242,6 +243,20 @@ export default function LoanFileDetail() {
               <p className="mb0 muted">What the borrower has answered, what is still open, and what needs your correction.</p>
             </div>
             <span className="btn btn-sm">Review →</span>
+          </div>
+        </Link>
+      )}
+
+      {/* Autopilot Pre-Underwriting (flag-gated). Placed above Documents deliberately: it is
+          what a processor opens first, and it says what to do with the documents below it. */}
+      {preUnderwritingEnabled() && (
+        <Link to={`/portal/file/${file.loanFileId}/pre-underwriting`} className="card linkcard">
+          <div className="spread">
+            <div>
+              <h2 className="mb0">Pre-underwriting</h2>
+              <p className="mb0 muted">Readiness, what is missing, what is worth a look, and which programs fit. Nothing is decided without you.</p>
+            </div>
+            <span className="btn btn-primary btn-sm">Open →</span>
           </div>
         </Link>
       )}
