@@ -115,36 +115,3 @@ function employmentFrom(documents, application) {
   if (stub?.employmentStartDate) return { startDate: stub.employmentStartDate, source: 'paystubs_30d' }
   return {}
 }
-
-/**
- * The checklist for this loan: which documents it actually needs.
- *
- * Derived from the loan itself rather than fixed, because asking a cash-out refinance borrower
- * for a purchase contract — or a W-2 employee for a business licence — is how a file stalls on
- * a document that was never relevant.
- *
- * @param {object} loan  { purpose, occupancy, program, selfEmployed, propertyType, hasCoBorrower }
- * @returns {Array<{docKey: string, required: boolean}>}
- */
-export function checklistFor(loan = {}) {
-  const purpose = String(loan.purpose || '').toLowerCase()
-  const program = String(loan.program || '').toLowerCase()
-  const keys = ['id_photo', 'credit_report']
-
-  if (loan.selfEmployed) keys.push('business_lic', 'bank_12mo')
-  else keys.push('paystubs_30d', 'w2_2yr')
-
-  keys.push('bank_2mo')
-
-  if (purpose.includes('purchase')) keys.push('purchase_contract')
-  else keys.push('mortgage_statement', 'hoi_dec', 'tax_bill')
-
-  if (loan.hasRentalIncome) keys.push('lease_rentroll')
-  if (program.includes('va')) keys.push('coe', 'dd214')
-
-  // Never twice, and never a key the catalog does not know — the checklist is the contract the
-  // borrower's screen and the processor's panel both render from.
-  return [...new Set(keys)]
-    .filter((k) => getDocumentType(k))
-    .map((docKey) => ({ docKey, required: true }))
-}

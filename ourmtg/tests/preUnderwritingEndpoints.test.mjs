@@ -514,3 +514,173 @@ test('the panel tells the loan officer credit is missing without offering to aut
     assert.equal(panel.credit.documentVersion, CREDIT_AUTH_VERSION)
   } finally { restore() }
 })
+
+// ── credit liabilities → the 1003 ───────────────────────────────────────────
+
+const CR_DOC = 'dddddddd-dddd-4ddd-8ddd-ddddddddddd9'
+
+const CREDIT_REPLY = {
+  stop_reason: 'end_turn',
+  content: [{ type: 'text', text: JSON.stringify({
+    docKey: 'credit_report', docKeyConfidence: 0.99,
+    fields: [
+      { name: 'equifaxScore', value: 700, confidence: 0.99 },
+      { name: 'experianScore', value: 710, confidence: 0.99 },
+      { name: 'transUnionScore', value: 705, confidence: 0.99 },
+    ],
+    tradelines: [
+      { creditorName: 'Discover', accountType: 'Revolving', monthlyPayment: 320, balance: 8100, accountLast4: '9001', status: 'Open', confidence: 0.95 },
+      { creditorName: 'Navient', accountType: 'Education', monthlyPayment: 0, balance: 61000, accountLast4: '7001', status: 'Deferred', confidence: 0.92 },
+      { creditorName: 'Old Navy', accountType: 'Revolving', monthlyPayment: 0, balance: 0, accountLast4: '1111', status: 'Closed - paid', confidence: 0.9 },
+    ],
+  }) }],
+}
+
+function creditTables() {
+  const t = TABLES()
+  t.loan_documents.push({
+    id: CR_DOC, loan_file_id: LOAN, owner_user_id: OWNER, doc_key: 'credit_report',
+    label: 'Credit report', status: 'uploaded', storage_path: 'files/credit.pdf', who: 'borrower',
+  })
+  t.application_parties = []
+  t.application_field_events = []
+  t.application_turns = []
+  return t
+}
+
+test('import writes the missing obligations into the 1003 through the reducer, as imported_credit', async () => {
+  const fake = createFakeSupabase({ tables: creditTables(), users: USERS })
+  fake.putFile('files/credit.pdf', Buffer.from('%PDF'), 'application/pdf')
+  const restore = install(fake, stubModel(CREDIT_REPLY))
+  try {
+    const h = await load({ CONVERSATIONAL_1003_ENABLED: 'true' })
+    await h.intake(post({ loanFileId: LOAN, documentId: CR_DOC, idempotencyKey: key('cr') }))
+
+    const res = await h.review(post({ loanFileId: LOAN, action: 'import_liabilities', idempotencyKey: key('imp') }))
+    assert.equal(res.status, 200)
+    const body = await res.json()
+
+    // Discover and the deferred Navient import; the closed Old Navy does not.
+    assert.deepEqual(body.result.imported.map((i) => i.creditorName).sort(), ['Discover', 'Navient'])
+    assert.equal(body.result.skipped.length, 1)
+    assert.equal(body.result.needsPayment.length, 1)
+    assert.equal(body.result.needsPayment[0].creditorName, 'Navient')
+
+    const events = fake.rowsOf('application_field_events')
+    assert.ok(events.length > 0)
+    for (const e of events) {
+      assert.equal(e.source, 'imported_credit', e.field_path)
+      assert.equal(e.actor_user_id, OWNER)
+    }
+    // The section gate answered, the fields written, and no account number anywhere.
+    const paths = events.map((e) => e.field_path)
+    assert.ok(paths.includes('parties[0].hasAnyLiabilities'))
+    assert.ok(paths.includes('parties[0].liabilities[0].creditorName'))
+    assert.ok(!paths.some((p) => /accountNumber/.test(p)))
+    const dump = JSON.stringify(events)
+    assert.ok(!dump.includes('9001') || !dump.includes('accountNumber'), 'no account digits under a number field')
+  } finally { restore() }
+})
+
+test('importing twice is a no-op the second time, not a duplicate section', async () => {
+  const fake = createFakeSupabase({ tables: creditTables(), users: USERS })
+  fake.putFile('files/credit.pdf', Buffer.from('%PDF'), 'application/pdf')
+  const restore = install(fake, stubModel(CREDIT_REPLY))
+  try {
+    const h = await load({ CONVERSATIONAL_1003_ENABLED: 'true' })
+    await h.intake(post({ loanFileId: LOAN, documentId: CR_DOC, idempotencyKey: key('cr2') }))
+    const first = await (await h.review(post({ loanFileId: LOAN, action: 'import_liabilities', idempotencyKey: key('i1') }))).json()
+    assert.equal(first.result.imported.length, 2)
+
+    const second = await (await h.review(post({ loanFileId: LOAN, action: 'import_liabilities', idempotencyKey: key('i2') }))).json()
+    assert.equal(second.result.imported.length, 0, JSON.stringify(second.result))
+
+    // Still exactly one creditorName row per creditor in the projection.
+    const state = fake.rowsOf('application_field_state')
+    const creditorRows = state.filter((s) => /liabilities\[\d+\]\.creditorName/.test(s.field_path))
+    assert.equal(creditorRows.length, 2)
+  } finally { restore() }
+})
+
+test('the panel shows the reconciliation before anything is written', async () => {
+  const fake = createFakeSupabase({ tables: creditTables(), users: USERS })
+  fake.putFile('files/credit.pdf', Buffer.from('%PDF'), 'application/pdf')
+  const restore = install(fake, stubModel(CREDIT_REPLY))
+  try {
+    const h = await load({ CONVERSATIONAL_1003_ENABLED: 'true' })
+    await h.intake(post({ loanFileId: LOAN, documentId: CR_DOC, idempotencyKey: key('cr3') }))
+    const panel = await (await h.review(makeRequest(panelUrl(), { token: 'tok-owner' }))).json()
+
+    assert.ok(panel.liabilitySync, 'reconciliation is on the panel')
+    assert.deepEqual(panel.liabilitySync.toImport.map((t) => t.creditorName).sort(), ['Discover', 'Navient'])
+    assert.equal(panel.liabilitySync.skipped[0].creditorName, 'Old Navy')
+    assert.ok(panel.liabilitySync.toImport.find((t) => t.creditorName === 'Navient').needsPayment)
+  } finally { restore() }
+})
+
+test('after the import, undisclosed_liability findings clear on the same response', async () => {
+  const fake = createFakeSupabase({ tables: creditTables(), users: USERS })
+  fake.putFile('files/credit.pdf', Buffer.from('%PDF'), 'application/pdf')
+  const restore = install(fake, stubModel(CREDIT_REPLY))
+  try {
+    const h = await load({ CONVERSATIONAL_1003_ENABLED: 'true' })
+    await h.intake(post({ loanFileId: LOAN, documentId: CR_DOC, idempotencyKey: key('cr4') }))
+
+    const before = await (await h.review(makeRequest(panelUrl(), { token: 'tok-owner' }))).json()
+    assert.ok(before.findings.some((f) => f.rule.startsWith('undisclosed_liability')), 'fires while undeclared')
+
+    const after = await (await h.review(post({ loanFileId: LOAN, action: 'import_liabilities', idempotencyKey: key('i3') }))).json()
+    const live = after.findings.filter((f) => f.rule.startsWith('undisclosed_liability') && f.status === 'pending_review')
+    assert.deepEqual(live, [], 'cleared once the 1003 knows about the debts')
+  } finally { restore() }
+})
+
+test('an import with no credit report on file is refused with a reason', async () => {
+  const fake = createFakeSupabase({ tables: creditTables(), users: USERS })
+  const restore = install(fake)
+  try {
+    const h = await load({ CONVERSATIONAL_1003_ENABLED: 'true' })
+    const res = await h.review(post({ loanFileId: LOAN, action: 'import_liabilities', idempotencyKey: key('no') }))
+    assert.equal(res.status, 409)
+    assert.match((await res.json()).error, /No credit report/)
+  } finally { restore() }
+})
+
+test('an attested application is not silently modified by an import', async () => {
+  const fake = createFakeSupabase({ tables: creditTables(), users: USERS })
+  fake.putFile('files/credit.pdf', Buffer.from('%PDF'), 'application/pdf')
+  fake.rowsOf('mortgage_applications').push({
+    id: '99999999-9999-4999-8999-999999999999', loan_file_id: LOAN, application_version: 1,
+    status: 'borrower_attested', schema_version: 'v', catalog_version: 'v', rules_version: 'v',
+  })
+  const restore = install(fake, stubModel(CREDIT_REPLY))
+  try {
+    const h = await load({ CONVERSATIONAL_1003_ENABLED: 'true' })
+    await h.intake(post({ loanFileId: LOAN, documentId: CR_DOC, idempotencyKey: key('cr5') }))
+    const res = await h.review(post({ loanFileId: LOAN, action: 'import_liabilities', idempotencyKey: key('att') }))
+    assert.equal(res.status, 409)
+    assert.match((await res.json()).error, /submitted/)
+    assert.equal(fake.rowsOf('application_field_events').length, 0)
+  } finally { restore() }
+})
+
+test('the borrower-reachable surface never carries document contents', async () => {
+  // NEVER_ECHOED's enforcement is structural: extraction values only travel on internal-only
+  // endpoints. This pins the one borrower-reachable endpoint in the feature to that guarantee —
+  // if someone ever adds extraction data to it, this is the test that goes red.
+  const fake = createFakeSupabase({ tables: creditTables(), users: USERS })
+  fake.putFile('files/credit.pdf', Buffer.from('%PDF'), 'application/pdf')
+  const restore = install(fake, stubModel(CREDIT_REPLY))
+  try {
+    const h = await load({ CONVERSATIONAL_1003_ENABLED: 'true' })
+    await h.intake(post({ loanFileId: LOAN, documentId: CR_DOC, idempotencyKey: key('ne') }))
+
+    const res = await h.credit(makeRequest(authUrl(), { token: 'tok-borrower' }))
+    assert.equal(res.status, 200)
+    const body = JSON.stringify(await res.json())
+    // Nothing read out of any document — no scores, no creditors, no balances.
+    for (const leak of ['equifax', '700', 'Discover', 'Navient', 'tradeline', 'fields']) {
+      assert.ok(!body.includes(leak), `borrower response carries "${leak}"`)
+    }
+  } finally { restore() }
+})

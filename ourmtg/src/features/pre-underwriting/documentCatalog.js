@@ -163,4 +163,12 @@ export const providedBy = (key) => getDocumentType(key)?.providedBy || 'borrower
 // a needless exposure of exactly the data the file exists to protect. The credit report is
 // here for a stronger reason — a borrower must never learn their standing from a page this
 // system rendered. That disclosure is the lender's, with the notice the law requires attached.
+//
+// HOW THIS IS ENFORCED TODAY: structurally. Every endpoint that returns extraction values
+// (pre-underwriting-intake, pre-underwriting-review) is internal-only and 403s the borrower —
+// asserted in tests/preUnderwritingEndpoints.test.mjs — and the only borrower-reachable
+// endpoint in the feature (credit-authorization GET) returns consent state, never document
+// contents. Anyone building a borrower-facing surface over extractions must filter by this
+// list; the test named "the borrower-reachable surface never carries document contents" is
+// where that obligation is pinned.
 export const NEVER_ECHOED = Object.freeze(['id_photo', 'credit_report'])

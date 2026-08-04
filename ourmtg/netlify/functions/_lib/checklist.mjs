@@ -92,3 +92,16 @@ export function isValidDocKey({ loanType, purpose }, docKey) {
 export function labelForDocKey({ loanType, purpose }, docKey) {
   return checklistFor({ loanType, purpose }).find((d) => d.doc_key === docKey)?.label || docKey
 }
+
+// ── Pre-underwriting view of the same checklist ─────────────────────────────
+// The SAME items the borrower's portal shows, in the shape the analysis layers read, plus the
+// documents only the loan team can produce. One checklist, two views — the alternative was a
+// second checklist in the analysis code, and two checklists mean the panel says "missing X"
+// while the borrower's portal says "missing Y" about the same file.
+export function preUnderwritingChecklist({ loanType, purpose } = {}) {
+  const items = checklistFor({ loanType, purpose }).map((it) => ({ docKey: it.doc_key, required: true }))
+  // Required on every file, pulled by the team under the borrower's authorization — which is
+  // why the borrower-facing checklist has never listed it and must not start.
+  items.push({ docKey: 'credit_report', required: true })
+  return items
+}
