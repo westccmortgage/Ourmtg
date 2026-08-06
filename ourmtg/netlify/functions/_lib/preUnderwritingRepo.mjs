@@ -183,6 +183,9 @@ export async function replaceFindings(svc, { loanFile, findings, runId, actor })
     source_documents: f.sourceDocuments || [],
     min_confidence: f.minConfidence,
     needs_human_review: Boolean(f.needsHumanReview),
+    // Explicit, not left to the column default: every read path filters on this value, and a
+    // storage layer that happened not to apply defaults would silently empty the review queue.
+    status: 'pending_review',
     rules_version: RULES_VERSION,
     catalog_version: CATALOG_VERSION,
     run_id: runId,
