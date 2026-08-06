@@ -24,7 +24,7 @@ const UNIQUE_KEYS = {
 // would make a legitimate re-run look like a duplicate-key error.
 const PARTIAL_UNIQUE = {
   pre_underwriting_findings: {
-    keys: ['loan_file_id', 'rule'],
+    keys: ['loan_file_id', 'dedupe_key'],
     where: (r) => r.superseded_by === null || r.superseded_by === undefined,
   },
 }

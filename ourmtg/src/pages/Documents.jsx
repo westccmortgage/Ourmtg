@@ -96,6 +96,14 @@ function DocItem({ loanFileId, item, onDone, task }) {
           {item.uploadedAt && item.status !== 'rejected' && <span className="muted"> · {shortDate(item.uploadedAt)}</span>}
         </div>
         {item.status === 'rejected' && item.rejectReason && <div className="rsub" style={{ color: 'var(--red)', marginTop: 6 }}>Needs another: {item.rejectReason}</div>}
+        {/* An upload that arrived but is not complete — one side of an ID, one W-2 of two, a
+            statement missing pages. Each line names exactly what to send, so "not done" never
+            reads as "start over". */}
+        {item.complete === false && item.gaps?.length > 0 && item.status !== 'rejected' && (
+          <div className="rsub" style={{ marginTop: 6 }}>
+            {item.gaps.map((g) => <div key={g} style={{ color: 'var(--amber, #9a6b00)' }}>{g}</div>)}
+          </div>
+        )}
         {error && <div className="rsub" style={{ color: 'var(--red)', marginTop: 6 }}>{error}</div>}
       </div>
       <div style={{ flex: '0 0 auto' }}>

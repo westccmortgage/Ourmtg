@@ -48,7 +48,8 @@ for f in \
   "${ROOT}/supabase/delta/003_conversational_1003.sql" \
   "${ROOT}/supabase/delta/004_protect_loan_files.sql" \
   "${ROOT}/supabase/delta/005_team_assisted_application.sql" \
-  "${ROOT}/supabase/delta/006_pre_underwriting.sql"
+  "${ROOT}/supabase/delta/006_pre_underwriting.sql" \
+  "${ROOT}/supabase/delta/007_finding_identity.sql"
 do
   name="$(basename "$f")"
   if psql -v ON_ERROR_STOP=1 -q "$DB" -f "$f" >/dev/null 2>/tmp/rehearsal_err; then
@@ -185,25 +186,33 @@ PU006=$(scalar "select jsonb_build_object(
 [ "$(echo "$PU006" | grep -o '"browser": 0')" ] && ok "browser has no access to findings" || bad "grants: $PU006"
 
 psql -q "$DB" >/dev/null 2>&1 <<SQL
-insert into pre_underwriting_findings (loan_file_id,rule,category,severity,explanation,min_confidence)
-  values ('${LF}','income_consistency','income','high','periods differ',0.82);
+insert into pre_underwriting_findings (loan_file_id,rule,category,severity,explanation,min_confidence,dedupe_key)
+  values ('${LF}','income_consistency','income','high','periods differ',0.82,'income_consistency');
 SQL
-rejects "a rule cannot fire twice on one file while both are live" \
-  "insert into pre_underwriting_findings (loan_file_id,rule,category,severity,explanation)
-   values ('${LF}','income_consistency','income','low','again');" "duplicate key value"
+# Delta 007: identity is the finding, not the rule. Two undisclosed creditors must coexist —
+# the pre-007 index made the second one 500 the whole intake.
+TWO_SAME_RULE="$(psql -qtA "$DB" -c "insert into pre_underwriting_findings
+   (loan_file_id,rule,category,severity,explanation,dedupe_key)
+   values ('${LF}','undisclosed_liability','liabilities','high','Discover','ul:discover'),
+          ('${LF}','undisclosed_liability','liabilities','high','Amex','ul:amex') returning 1;" 2>&1 | wc -l)"
+[ "$TWO_SAME_RULE" = "2" ] && ok "one rule may hold two live findings about two subjects" \
+  || bad "two creditors under one rule refused: $TWO_SAME_RULE"
+rejects "the SAME finding cannot be live twice" \
+  "insert into pre_underwriting_findings (loan_file_id,rule,category,severity,explanation,dedupe_key)
+   values ('${LF}','undisclosed_liability','liabilities','high','Discover again','ul:discover');" "duplicate key value"
 rejects "a finding category is a closed vocabulary" \
-  "insert into pre_underwriting_findings (loan_file_id,rule,category,severity,explanation)
-   values ('${LF}','r2','vibes','low','x');" "violates check constraint"
+  "insert into pre_underwriting_findings (loan_file_id,rule,category,severity,explanation,dedupe_key)
+   values ('${LF}','r2','vibes','low','x','r2');" "violates check constraint"
 rejects "nothing in this schema can express an approval" \
-  "insert into pre_underwriting_findings (loan_file_id,rule,category,severity,explanation,status)
-   values ('${LF}','r3','income','low','x','approved');" "violates check constraint"
+  "insert into pre_underwriting_findings (loan_file_id,rule,category,severity,explanation,status,dedupe_key)
+   values ('${LF}','r3','income','low','x','approved','r3');" "violates check constraint"
 rejects "a resolution must say who decided, and when" \
-  "insert into pre_underwriting_findings (loan_file_id,rule,category,severity,explanation,status)
-   values ('${LF}','r4','income','low','x','dismissed');" "violates check constraint"
-psql -q "$DB" -c "update pre_underwriting_findings set superseded_by=id where rule='income_consistency';" >/dev/null 2>&1
-RERUN="$(psql -qtA "$DB" -c "insert into pre_underwriting_findings (loan_file_id,rule,category,severity,explanation)
-   values ('${LF}','income_consistency','income','high','re-run') returning 1;" 2>&1)"
-[ "$RERUN" = "1" ] && ok "superseding frees the rule to fire again" || bad "re-run blocked: $RERUN"
+  "insert into pre_underwriting_findings (loan_file_id,rule,category,severity,explanation,status,dedupe_key)
+   values ('${LF}','r4','income','low','x','dismissed','r4');" "violates check constraint"
+psql -q "$DB" -c "update pre_underwriting_findings set superseded_by=id where dedupe_key='ul:discover';" >/dev/null 2>&1
+RERUN="$(psql -qtA "$DB" -c "insert into pre_underwriting_findings (loan_file_id,rule,category,severity,explanation,dedupe_key)
+   values ('${LF}','undisclosed_liability','liabilities','high','re-run','ul:discover') returning 1;" 2>&1)"
+[ "$RERUN" = "1" ] && ok "superseding frees the same finding to fire again" || bad "re-run blocked: $RERUN"
 rejects "an extraction confidence must be 0..1" \
   "insert into document_extractions (loan_file_id,document_id,doc_key_confidence)
    values ('${LF}','00000000-0000-4000-8000-000000000111',5.0);" "violates"
