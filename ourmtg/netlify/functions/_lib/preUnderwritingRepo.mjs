@@ -146,7 +146,7 @@ const fromRow = (r) => ({
 export async function replaceFindings(svc, { loanFile, findings, runId, actor }) {
   const { data: existing } = await svc
     .from('pre_underwriting_findings')
-    .select('id, rule, status')
+    .select('id, rule, status, dedupe_key')
     .eq('loan_file_id', loanFile.id)
     .is('superseded_by', null)
 
@@ -154,12 +154,15 @@ export async function replaceFindings(svc, { loanFile, findings, runId, actor })
   const pending = []
   for (const row of existing || []) {
     if (row.status === 'pending_review') pending.push(row)
-    else decided.set(row.rule, row)
+    // Keyed by the finding's own identity, NOT its rule. undisclosed_liability fires once per
+    // creditor: a human's dismissal of the Discover finding must not swallow a brand-new Amex
+    // finding just because both share a rule name.
+    else decided.set(row.dedupe_key || row.rule, row)
   }
 
   // A finding a person confirmed, corrected, or dismissed is not re-asked. Re-raising it every
   // time the job runs is how a reviewer learns to ignore the panel.
-  const fresh = findings.filter((f) => !decided.has(f.rule))
+  const fresh = findings.filter((f) => !decided.has(dedupeKeyOf(f)))
 
   if (pending.length) {
     // Superseded by nothing in particular — pointing at their own id marks them closed without
@@ -183,6 +186,10 @@ export async function replaceFindings(svc, { loanFile, findings, runId, actor })
     source_documents: f.sourceDocuments || [],
     min_confidence: f.minConfidence,
     needs_human_review: Boolean(f.needsHumanReview),
+    // The finding's identity. The live-uniqueness index rides on this, so a rule that fires
+    // once per creditor stores one row per creditor instead of failing the whole run on the
+    // second insert — the bug that 500ed intake on any file with two undisclosed debts.
+    dedupe_key: dedupeKeyOf(f),
     // Explicit, not left to the column default: every read path filters on this value, and a
     // storage layer that happened not to apply defaults would silently empty the review queue.
     status: 'pending_review',
@@ -251,6 +258,10 @@ export async function listDocuments(svc, loanFileId) {
   if (error) throw new Error('documents read: ' + error.message)
   return (data || []).filter((d) => getDocumentType(d.doc_key) || d.doc_key)
 }
+
+// The deterministic identity rules already stamp on each finding (findingIds above); the rule
+// name is the honest fallback for a finding produced without one.
+const dedupeKeyOf = (f) => f.id || f.rule
 
 // Versions travel with every row so a finding produced last quarter can still be explained
 // after the rules and the catalog have both moved on.
