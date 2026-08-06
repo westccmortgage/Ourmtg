@@ -481,3 +481,23 @@ test('the derived score is what actually drives the program list', () => {
 })
 
 const round2 = (n) => Math.round(n * 100) / 100
+
+test('a file with no stated purpose is never asked for another home\'s documents', () => {
+  // A file created mid-phone-call has no purpose yet. The one guess that is visibly wrong on a
+  // screen is the refinance branch: a purchase borrower asked for a mortgage statement,
+  // homeowners insurance, and a tax bill for a home they do not own. Refi documents appear ONLY
+  // on an explicit refinance; everything else defaults to the purchase shape, whose one extra
+  // item is worded "(if you have one)".
+  const unknown = preUnderwritingChecklist({}).map((c) => c.docKey)
+  assert.ok(!unknown.includes('mortgage_statement'), JSON.stringify(unknown))
+  assert.ok(!unknown.includes('hoi_dec'))
+  assert.ok(!unknown.includes('tax_bill'))
+  for (const core of ['id_photo', 'credit_report', 'paystubs_30d', 'w2_2yr', 'bank_2mo']) {
+    assert.ok(unknown.includes(core), core)
+  }
+  const refi = preUnderwritingChecklist({ purpose: 'cash-out refinance' }).map((c) => c.docKey)
+  assert.ok(refi.includes('mortgage_statement'))
+  assert.ok(!refi.includes('purchase_contract'))
+  // And the credit report is on every variant — it is the team's item, never the borrower's.
+  for (const list of [unknown, refi]) assert.ok(list.includes('credit_report'))
+})
