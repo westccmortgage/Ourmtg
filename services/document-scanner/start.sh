@@ -13,4 +13,14 @@ while [ ! -S /run/clamav/clamd.ctl ] && [ "$i" -lt 60 ]; do
   sleep 1
 done
 
+if [ ! -S /run/clamav/clamd.ctl ]; then
+  echo "ClamAV socket did not become ready" >&2
+  exit 1
+fi
+
+if ! command -v clamdscan >/dev/null 2>&1; then
+  echo "clamdscan executable is missing" >&2
+  exit 1
+fi
+
 exec node /app/server.mjs
