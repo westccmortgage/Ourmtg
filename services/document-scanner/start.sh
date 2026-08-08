@@ -4,6 +4,7 @@ set -eu
 mkdir -p /run/clamav /var/log/clamav
 chown -R clamav:clamav /run/clamav /var/log/clamav /var/lib/clamav
 freshclam || true
+freshclam -d -c 12 || true
 clamd --config-file=/etc/clamav/clamd.conf &
 
 i=0
