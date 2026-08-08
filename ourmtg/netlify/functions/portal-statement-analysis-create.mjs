@@ -44,10 +44,11 @@ export default async (req) => {
   if (!isInternal(access)) return json({ ok: false, error: 'Not authorized' }, 403)
 
   const { data: documents, error: documentError } = await svc.from('loan_documents')
-    .select('id, label, status, storage_path')
+    .select('id, label, status, storage_path, reject_reason')
     .eq('loan_file_id', loanFileId).in('id', documentIds)
   if (documentError || documents?.length !== documentIds.length) return json({ ok: false, error: 'One or more documents are unavailable' }, 400)
-  if (documents.some((doc) => !doc.storage_path || !['uploaded', 'accepted'].includes(doc.status))) {
+  if (documents.some((doc) => String(doc.reject_reason || '').startsWith('__REMOVED__:')
+    || !doc.storage_path || !['uploaded', 'accepted'].includes(doc.status))) {
     return json({ ok: false, error: 'Every selected statement must be uploaded first' }, 409)
   }
 

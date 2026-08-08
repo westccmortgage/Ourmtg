@@ -4,7 +4,7 @@
 // and does not send email/SMS/push/webhook communications.
 
 import { admin, isConfigured } from './_lib/supabase.mjs'
-import { authUser, json, preflight, loadLoanFile, resolveAccess, canSeeFinancials, logAccess, randomToken } from './_lib/portal.mjs'
+import { authUser, json, preflight, loadLoanFile, resolveAccess, canSeeFinancials, isInternal, logAccess, randomToken } from './_lib/portal.mjs'
 import { sendPlatformEmail, brandedEmail, esc } from './_lib/mailer.mjs'
 import { resolveTaskContext } from './_lib/orgAccess.mjs'
 import { createTaskRepo } from './_lib/taskRepo.mjs'
@@ -135,17 +135,25 @@ export default async (req) => {
     if (uErr) return json({ ok: false, error: 'Could not mark uploaded' }, 500)
   }
 
+  const internalUpload = isInternal(access)
+  const uploaderRole = internalUpload ? 'loan_team' : (access.visibility === 'coborrower' ? 'coborrower' : 'borrower')
   try {
     await svc.from('loan_messages').insert({
       loan_file_id: doc.loan_file_id,
       owner_user_id: doc.owner_user_id,
       direction: 'in',
-      author_role: access.visibility === 'coborrower' ? 'coborrower' : 'borrower',
+      author_role: uploaderRole,
       body: `Uploaded: ${doc.label || doc.doc_key}`,
       channel: 'portal',
     })
   } catch { /* timeline is fail-soft */ }
-  await logAccess(svc, { portalUser: auth.user.id, loanFileId: doc.loan_file_id, action: 'upload_doc_complete', target: doc.doc_key, req })
+  await logAccess(svc, {
+    portalUser: auth.user.id,
+    loanFileId: doc.loan_file_id,
+    action: 'upload_doc_complete',
+    target: `document:${doc.id}:${uploaderRole}`,
+    req,
+  })
 
   // Task-linked Phase 1C is intent-only. Preserve the pre-existing email behavior solely for
   // the task-less legacy path.
@@ -158,18 +166,22 @@ export default async (req) => {
           to: ownerEmail,
           subject: `📄 Document uploaded: ${doc.label || doc.doc_key}`,
           html: brandedEmail({
-            heading: 'A borrower uploaded a document',
-            intro: `${esc(loanFile.borrower_name || 'A borrower')} just uploaded a document to their loan file.`,
+            heading: internalUpload ? 'The loan team added a document' : 'A borrower uploaded a document',
+            intro: internalUpload
+              ? `${esc(auth.user.email || 'A loan-team member')} added a document to ${esc(loanFile.borrower_name || 'this borrower')}'s loan file.`
+              : `${esc(loanFile.borrower_name || 'A borrower')} just uploaded a document to their loan file.`,
             rows: [['Borrower', loanFile.borrower_name || '—'], ['Document', doc.label || doc.doc_key], ['Loan #', loanFile.loan_number || '—']],
             cta: { text: 'Review in your dashboard', url: OURMTG_URL },
             note: 'Review and accept it in the loan file.',
           }),
-          text: `${loanFile.borrower_name || 'A borrower'} uploaded: ${doc.label || doc.doc_key}.`,
+          text: internalUpload
+            ? `${auth.user.email || 'A loan-team member'} added ${doc.label || doc.doc_key} to ${loanFile.borrower_name || 'the loan file'}.`
+            : `${loanFile.borrower_name || 'A borrower'} uploaded: ${doc.label || doc.doc_key}.`,
         })
       }
     } catch { /* existing email is fail-soft */ }
     try {
-      if (auth.user.email) {
+      if (!internalUpload && auth.user.email) {
         await sendPlatformEmail({
           to: auth.user.email,
           subject: 'We received your document',

@@ -173,7 +173,7 @@ export default async (req) => {
   const emptyResult = Promise.resolve({ data: [], error: null })
   const [docsResult, msgsResult, condsResult, appsResult] = await Promise.all([
     accessibleIds.length
-      ? svc.from('loan_documents').select('loan_file_id, doc_key, status').in('loan_file_id', accessibleIds)
+      ? svc.from('loan_documents').select('loan_file_id, doc_key, status, reject_reason').in('loan_file_id', accessibleIds)
       : emptyResult,
     accessibleIds.length
       ? svc.from('loan_messages').select('loan_file_id, created_at').in('loan_file_id', accessibleIds).order('created_at', { ascending: false })
@@ -204,6 +204,7 @@ export default async (req) => {
 
   const docsByFile = new Map()
   for (const d of docs || []) {
+    if (String(d.reject_reason || '').startsWith('__REMOVED__:')) continue
     if (!docsByFile.has(d.loan_file_id)) docsByFile.set(d.loan_file_id, [])
     docsByFile.get(d.loan_file_id).push(d)
   }

@@ -101,7 +101,7 @@ export default async (req) => {
   } catch (e) { console.warn('[portal-doc-review] message log (non-fatal):', e.message) }
 
   await logAccess(svc, {
-    portalUser: auth.user.id, loanFileId: doc.loan_file_id, action: `doc_${decision}`, target: doc.doc_key, req,
+    portalUser: auth.user.id, loanFileId: doc.loan_file_id, action: `doc_${decision}`, target: `document:${doc.id}`, req,
   })
 
   // Notify the borrower ONLY on rejection — it's actionable (re-upload needed).

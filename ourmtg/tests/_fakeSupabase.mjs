@@ -130,7 +130,16 @@ export function createFakeSupabase({ tables = {}, users = {}, storage = {} } = {
       return user ? json({ user }) : json({ message: 'User not found' }, 404)
     }
 
-    // ── Storage: object download ────────────────────────────────────────────
+    // ── Storage: object removal / download ─────────────────────────────────
+    if (u.pathname.startsWith('/storage/v1/object/') && method === 'DELETE') {
+      const bucket = decodeURIComponent(u.pathname.replace('/storage/v1/object/', '').replace(/\/$/, ''))
+      const body = JSON.parse(opts.body || '{}')
+      for (const prefix of body.prefixes || []) {
+        delete files[prefix]
+        delete files[`${bucket}/${prefix}`]
+      }
+      return json([])
+    }
     if (u.pathname.startsWith('/storage/v1/object/')) {
       const path = decodeURIComponent(u.pathname.replace(/^\/storage\/v1\/object\/(authenticated\/)?/, ''))
       const key = path.replace(/^ourmtg-docs\//, '')

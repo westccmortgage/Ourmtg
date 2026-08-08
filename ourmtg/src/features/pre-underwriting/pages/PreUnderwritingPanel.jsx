@@ -84,13 +84,14 @@ export default function PreUnderwritingPanel() {
       </div>
 
       {regulatory && (
-        <div className="card">
-          <div className="card-head">
-            <h2>Operational compliance</h2>
+        <details className="card">
+          <summary className="spread" style={{ cursor: 'pointer', listStyle: 'none' }}>
+            <b>System readiness and compliance setup</b>
             <span className={regulatory.status === 'ready_for_controlled_pilot' ? 'chip green' : 'chip red'}>
               {regulatory.status === 'ready_for_controlled_pilot' ? 'Controlled pilot ready' : 'Blocked'}
             </span>
-          </div>
+          </summary>
+          <div style={{ marginTop: 16 }}>
           <p className="muted" style={{ marginTop: 0 }}>{regulatory.meaning}</p>
           <p className="hint">
             Catalog {regulatory.catalogVersion} · source check {regulatory.verifiedAt}. This is
@@ -116,7 +117,8 @@ export default function PreUnderwritingPanel() {
               ))}
             </div>
           )}
-        </div>
+          </div>
+        </details>
       )}
 
       {/* ── The numbers ───────────────────────────────────────────────────── */}

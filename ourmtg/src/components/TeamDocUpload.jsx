@@ -12,6 +12,8 @@
 // meant minting a link with nobody attached to it.
 import { useEffect, useState } from 'react'
 import { getChecklist, uploadDocument } from '../lib/api'
+import { readDocument } from '../features/pre-underwriting/api'
+import { preUnderwritingEnabled } from '../features/pre-underwriting/clientFlag'
 import { Alert } from './ui'
 
 export default function TeamDocUpload({ loanFileId, onUploaded }) {
@@ -43,8 +45,19 @@ export default function TeamDocUpload({ loanFileId, onUploaded }) {
     if (!file || !docKey) return
     setError(''); setOk(''); setBusy('upload')
     try {
-      await uploadDocument(loanFileId, docKey, file)
-      setOk('Added to the file. It shows as uploaded and is waiting for review.')
+      const selected = (items || []).find((item) => item.docKey === docKey)
+      const uploaded = await uploadDocument(loanFileId, docKey, file, { documentId: selected?.documentId || null })
+      if (preUnderwritingEnabled()) {
+        try {
+          await readDocument(loanFileId, uploaded.documentId)
+          setOk('Added securely and read. The extracted values are ready for your review.')
+        } catch (readError) {
+          setOk('Added securely to the file.')
+          setError(`The file was saved, but automatic reading is blocked: ${readError?.message || 'reader unavailable'}`)
+        }
+      } else {
+        setOk('Added to the file. It shows as uploaded and is waiting for review.')
+      }
       setDocKey('')
       onUploaded?.()
     } catch (err) {

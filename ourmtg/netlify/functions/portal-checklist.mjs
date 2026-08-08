@@ -8,6 +8,7 @@ import { checklistFor } from './_lib/checklist.mjs'
 import { providedBy, getDocumentType } from '../../src/features/pre-underwriting/documentCatalog.js'
 import { assessCompleteness } from '../../src/features/pre-underwriting/completeness.js'
 import { groupParts } from '../../src/features/pre-underwriting/extractionContract.js'
+import { activeDocuments } from './_lib/documentState.mjs'
 
 export default async (req) => {
   if (req.method === 'OPTIONS') return preflight()
@@ -70,7 +71,8 @@ export default async (req) => {
     return read
   }
 
-  const byKey = new Map((docs || []).map((d) => [d.doc_key, d]))
+  const visibleDocs = activeDocuments(docs)
+  const byKey = new Map(visibleDocs.map((d) => [d.doc_key, d]))
   const requiredKeys = new Set(required.map((it) => it.doc_key))
   const items = required.map((it) => {
     const row = byKey.get(it.doc_key)
@@ -93,7 +95,7 @@ export default async (req) => {
     return base
   })
 
-  for (const d of docs || []) {
+  for (const d of visibleDocs) {
     if (requiredKeys.has(d.doc_key)) continue
     // Documents only the loan team can produce — the credit report above all — never appear on
     // the borrower's list. A borrower shown "credit_report · REPLACE" is being asked to obtain

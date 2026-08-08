@@ -76,7 +76,7 @@ function DocItem({ loanFileId, item, onDone, task }) {
         requiredDocumentId: material.documentId,
         expectedRevision: material.expectedRevision,
         idempotencyKey: operation.idempotencyKey,
-      } : null)
+      } : { documentId: item.documentId })
       if (task) settlePendingOperation(scope, operation, null)
       await onDone()
     } catch (err) {
@@ -86,7 +86,7 @@ function DocItem({ loanFileId, item, onDone, task }) {
   }
 
   const canUpload = ['missing', 'requested', 'rejected'].includes(item.status)
-  const cta = item.status === 'rejected' ? 'Re-upload' : canUpload ? 'Upload' : 'Replace'
+  const cta = item.status === 'rejected' ? 'Re-upload' : canUpload ? 'Upload' : 'Contact your loan team to replace'
   return (
     <div className="row">
       <div className="grow">
@@ -108,7 +108,7 @@ function DocItem({ loanFileId, item, onDone, task }) {
       </div>
       <div style={{ flex: '0 0 auto' }}>
         <input ref={inputRef} type="file" accept="image/*,application/pdf" hidden onChange={onPick} />
-        <button className={`btn btn-sm ${canUpload ? 'btn-primary' : 'btn-ghost'}`} disabled={busy || (task && task.status !== 'in_progress')} onClick={() => inputRef.current?.click()}>
+        <button className={`btn btn-sm ${canUpload ? 'btn-primary' : 'btn-ghost'}`} disabled={busy || !canUpload || (task && task.status !== 'in_progress')} onClick={() => inputRef.current?.click()}>
           {busy ? 'Uploading…' : cta}
         </button>
       </div>

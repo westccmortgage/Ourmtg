@@ -78,6 +78,9 @@ export const getFileDetail = (loanFileId) =>
 export const reviewDoc = (documentId, decision, rejectReason) =>
   call('portal-doc-review', { method: 'POST', body: { documentId, decision, rejectReason } })
 
+export const removeDocument = (loanFileId, documentId, reason) =>
+  call('portal-doc-remove', { method: 'POST', body: { loanFileId, documentId, reason } })
+
 export const setPreapproval = (loanFileId, amount, expires) =>
   call('portal-preapproval-set', { method: 'POST', body: { loanFileId, amount, expires } })
 
@@ -164,10 +167,12 @@ export async function listMessages(loanFileId) {
 }
 
 // ── Upload a file to a server-minted signed URL, then finalize ───────────────
-export async function uploadDocument(loanFileId, docKey, file, taskContext = null) {
+export async function uploadDocument(loanFileId, docKey, file, options = null) {
+  const taskContext = options?.taskId ? options : null
   const signed = await getUploadUrl(loanFileId, docKey, {
     contentType: file.type || null,
     filename: file.name || null,
+    ...(options?.documentId ? { documentId: options.documentId } : {}),
     ...(taskContext ? { taskId: taskContext.taskId, documentId: taskContext.requiredDocumentId } : {}),
   })
   if (taskContext?.requiredDocumentId && signed.documentId !== taskContext.requiredDocumentId) {

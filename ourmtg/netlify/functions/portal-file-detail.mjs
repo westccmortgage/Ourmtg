@@ -5,6 +5,7 @@
 import { admin, isConfigured } from './_lib/supabase.mjs'
 import { authUser, json, preflight, loadLoanFile, resolveAccess, isInternal, logAccess, stageInfo } from './_lib/portal.mjs'
 import { listBorrowerParticipants } from './_lib/orgAccess.mjs'
+import { activeDocuments } from './_lib/documentState.mjs'
 
 const BUCKET = 'ourmtg-docs'
 const DOWNLOAD_TTL = 300
@@ -39,13 +40,36 @@ export default async (req) => {
     .order('requested_at', { ascending: true })
   if (dErr) return json({ ok: false, error: 'Database error' }, 500)
 
+  // Exact completion events let the team distinguish a borrower upload from a processor upload.
+  // Older events only named a doc key and are intentionally left unknown rather than guessed.
+  const activeDocs = activeDocuments(docs)
+  const documentIds = activeDocs.map((document) => `document:${document.id}`)
+  let uploadEvents = []
+  if (documentIds.length) {
+    const { data } = await svc.from('portal_access_log')
+      .select('portal_user, target, created_at')
+      .eq('loan_file_id', loanFileId).eq('action', 'upload_doc_complete')
+      .order('created_at', { ascending: false })
+    uploadEvents = data || []
+  }
+
+  const uploadUsers = new Map()
+  for (const userId of [...new Set(uploadEvents.map((event) => event.portal_user).filter(Boolean))]) {
+    try {
+      const { data } = await svc.auth.admin.getUserById(userId)
+      uploadUsers.set(userId, data?.user?.email || null)
+    } catch { /* provenance remains unknown instead of breaking the file */ }
+  }
+
   const documents = []
-  for (const d of docs || []) {
+  for (const d of activeDocs) {
     let downloadUrl = null
     if (d.storage_path && (d.status === 'uploaded' || d.status === 'accepted')) {
       const { data: signed } = await svc.storage.from(BUCKET).createSignedUrl(d.storage_path, DOWNLOAD_TTL)
       downloadUrl = signed?.signedUrl || null
     }
+    const uploadEvent = uploadEvents.find((event) => String(event.target || '').split(':')[1] === d.id)
+    const uploadRole = String(uploadEvent?.target || '').split(':')[2] || null
     documents.push({
       id: d.id,
       docKey: d.doc_key,
@@ -56,6 +80,8 @@ export default async (req) => {
       reviewedAt: d.reviewed_at,
       rejectReason: d.status === 'rejected' ? d.reject_reason : null,
       downloadUrl,
+      uploadedByEmail: uploadEvent ? (uploadUsers.get(uploadEvent.portal_user) || null) : null,
+      uploadedByRole: uploadRole,
     })
   }
 

@@ -6,7 +6,7 @@
 // All actions call owner-only gateway endpoints; the page reloads detail after each.
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { getFileDetail, reviewDoc, setPreapproval, createInvite, requestDoc, setCondition, setLoanFile } from '../lib/api'
+import { getFileDetail, reviewDoc, removeDocument, setPreapproval, createInvite, requestDoc, setCondition, setLoanFile } from '../lib/api'
 import { money, shortDate, relTime } from '../lib/format'
 import { STAGE_STEPS, STAGE_LABEL, STAGE_COLOR } from '../lib/pipeline'
 import StatusTracker from '../components/StatusTracker'
@@ -19,8 +19,9 @@ import { conversational1003Enabled } from '../features/conversational-1003/clien
 import { preUnderwritingEnabled } from '../features/pre-underwriting/clientFlag'
 import TeamDocUpload from '../components/TeamDocUpload'
 
-function DocRow({ doc, onReview }) {
+function DocRow({ doc, loanFileId, onReview, onRemoved }) {
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
   async function act(decision) {
     let reason = null
     if (decision === 'rejected') {
@@ -28,7 +29,22 @@ function DocRow({ doc, onReview }) {
       if (!reason || reason.trim().length < 3) return
     }
     setBusy(true)
-    try { await onReview(doc.id, decision, reason) } finally { setBusy(false) }
+    setError('')
+    try { await onReview(doc.id, decision, reason) }
+    catch (err) { setError(err?.message || 'Could not review this document.') }
+    finally { setBusy(false) }
+  }
+  async function remove() {
+    const reason = window.prompt('Why is this file being removed? This reason stays in the audit log.')
+    if (!reason || reason.trim().length < 3) return
+    if (!window.confirm('Remove this document from the loan file and permanently delete its stored contents?')) return
+    setBusy(true)
+    setError('')
+    try {
+      await removeDocument(loanFileId, doc.id, reason)
+      await onRemoved?.()
+    } catch (err) { setError(err?.message || 'Could not remove this document.') }
+    finally { setBusy(false) }
   }
   return (
     <div className="row">
@@ -39,16 +55,23 @@ function DocRow({ doc, onReview }) {
           {doc.uploadedAt && <span className="muted"> · uploaded {relTime(doc.uploadedAt)}</span>}
           {doc.downloadUrl && <> · <a href={doc.downloadUrl} target="_blank" rel="noreferrer">View</a></>}
         </div>
+        {doc.uploadedAt && (
+          <div className="rsub" style={{ marginTop: 4 }}>
+            Added by {doc.uploadedByEmail || (doc.uploadedByRole === 'loan_team' ? 'loan team' : doc.uploadedByRole || 'unknown (historical upload)')}
+          </div>
+        )}
         {doc.status === 'rejected' && doc.rejectReason && (
           <div className="rsub" style={{ color: 'var(--red)', marginTop: 4 }}>Rejected: {doc.rejectReason}</div>
         )}
+        {error && <div className="rsub" style={{ color: 'var(--red)', marginTop: 4 }}>{error}</div>}
       </div>
-      {doc.status === 'uploaded' && (
-        <div style={{ flex: '0 0 auto', display: 'flex', gap: 8 }}>
+      <div style={{ flex: '0 0 auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {doc.status === 'uploaded' && <>
           <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => act('accepted')}>Accept</button>
           <button className="btn btn-sm btn-danger" disabled={busy} onClick={() => act('rejected')}>Reject</button>
-        </div>
-      )}
+        </>}
+        <button className="btn btn-sm btn-danger" disabled={busy} onClick={remove}>Remove file</button>
+      </div>
     </div>
   )
 }
@@ -264,7 +287,7 @@ export default function LoanFileDetail() {
       <div className="card">
         <div className="card-head"><h2>Documents</h2>{pending.length > 0 && <span className="chip amber">{pending.length} to review</span>}</div>
         {documents.length === 0 && <Empty>No documents requested or uploaded yet.</Empty>}
-        {documents.map((d) => <DocRow key={d.id} doc={d} onReview={onReview} />)}
+        {documents.map((d) => <DocRow key={d.id} doc={d} loanFileId={file.loanFileId} onReview={onReview} onRemoved={load} />)}
         <RequestDocForm loanFileId={file.loanFileId} onCreated={load} />
       </div>
 

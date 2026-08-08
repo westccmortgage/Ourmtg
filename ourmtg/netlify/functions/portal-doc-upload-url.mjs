@@ -3,7 +3,7 @@
 // the exact required loan_documents row and authorized borrower participant.
 
 import { admin, isConfigured } from './_lib/supabase.mjs'
-import { authUser, json, preflight, loadLoanFile, resolveAccess, canSeeFinancials, logAccess, randomToken, storageDocPath } from './_lib/portal.mjs'
+import { authUser, json, preflight, loadLoanFile, resolveAccess, canSeeFinancials, isInternal, logAccess, randomToken, storageDocPath } from './_lib/portal.mjs'
 import { isValidDocKey, labelForDocKey } from './_lib/checklist.mjs'
 import { validateUpload, hasDangerousExtension } from './_lib/upload-policy.mjs'
 import { readJsonBody, isUuid, docTaskLinkDecision } from './_lib/requestGuard.mjs'
@@ -53,7 +53,7 @@ export default async (req) => {
   let existing = null
   if (body.documentId) {
     const { data, error } = await svc.from('loan_documents')
-      .select('id, label, who, status, doc_key')
+      .select('id, label, who, status, doc_key, storage_path, reject_reason')
       .eq('id', body.documentId).eq('loan_file_id', body.loanFileId).eq('doc_key', docKey)
       .maybeSingle()
     if (error) return json({ ok: false, error: 'Database error' }, 500)
@@ -61,8 +61,9 @@ export default async (req) => {
     existing = data
   } else {
     const { data, error } = await svc.from('loan_documents')
-      .select('id, label, who, status, doc_key')
+      .select('id, label, who, status, doc_key, storage_path, reject_reason')
       .eq('loan_file_id', body.loanFileId).eq('doc_key', docKey)
+      .order('requested_at', { ascending: false }).limit(1)
       .maybeSingle()
     if (error) return json({ ok: false, error: 'Database error' }, 500)
     existing = data || null
@@ -70,6 +71,17 @@ export default async (req) => {
 
   if (!existing && !isValidDocKey({ loanType: loanFile.loan_type, purpose: loanFile.purpose }, docKey)) {
     return json({ ok: false, error: 'Unknown document type for this loan' }, 400)
+  }
+
+  // The old implementation replaced storage_path before the new upload was complete. A failed
+  // upload therefore detached the good document. Until the schema has a transactional pending
+  // replacement column, require the operator to remove the existing copy explicitly first.
+  if (existing?.storage_path && ['uploaded', 'accepted'].includes(existing.status)) {
+    return json({
+      ok: false,
+      error: 'This request already has a file. Remove the incorrect copy before uploading its replacement.',
+      code: 'remove_before_replace',
+    }, 409)
   }
 
   if (route.mode === 'task') {
@@ -110,6 +122,12 @@ export default async (req) => {
     documentId = inserted.id
   }
 
-  await logAccess(svc, { portalUser: auth.user.id, loanFileId: body.loanFileId, action: 'upload_doc', target: docKey, req })
+  await logAccess(svc, {
+    portalUser: auth.user.id,
+    loanFileId: body.loanFileId,
+    action: 'upload_doc',
+    target: `document:${documentId}:${isInternal(access) ? 'loan_team' : (access.visibility === 'coborrower' ? 'coborrower' : 'borrower')}`,
+    req,
+  })
   return json({ ok: true, documentId, bucket: BUCKET, path: storagePath, uploadUrl: signed.signedUrl, token: signed.token })
 }

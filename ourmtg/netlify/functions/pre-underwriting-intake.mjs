@@ -84,13 +84,16 @@ export default async (req) => {
   try {
     const { data: document, error: dErr } = await svc
       .from('loan_documents')
-      .select('id, loan_file_id, doc_key, label, storage_path, status')
+      .select('id, loan_file_id, doc_key, label, storage_path, status, reject_reason')
       .eq('id', body.documentId)
       .maybeSingle()
     if (dErr) return json({ ok: false, error: 'Database error' }, 500)
     if (!document) return json({ ok: false, error: 'Document not found' }, 404)
     // The document id is never trusted as proof of which file it belongs to.
     if (document.loan_file_id !== loanFile.id) {
+      return json({ ok: false, error: 'Document not found' }, 404)
+    }
+    if (String(document.reject_reason || '').startsWith('__REMOVED__:')) {
       return json({ ok: false, error: 'Document not found' }, 404)
     }
 
