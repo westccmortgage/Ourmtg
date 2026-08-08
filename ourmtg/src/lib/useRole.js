@@ -2,12 +2,13 @@
 //   • portal_access grants (RLS-readable) → borrower/co-borrower and/or realtor files
 //   • portal-review-queue returning owned files → loan officer / owner
 // A user is usually exactly one of these; we still surface all applicable roles so a
-// tester who is both can switch. Returns { loading, error, roles, grants, ownedFiles }.
+// tester who is both can switch. The review queue also returns server-derived workspace
+// identity/owner context; the browser never decides which admin owns a file.
 import { useEffect, useState } from 'react'
 import { listMyGrants, getReviewQueue } from './api'
 
 export function useRole() {
-  const [state, setState] = useState({ loading: true, error: '', roles: [], grants: [], ownedFiles: [] })
+  const [state, setState] = useState({ loading: true, error: '', roles: [], grants: [], ownedFiles: [], workspace: null })
 
   useEffect(() => {
     let alive = true
@@ -24,9 +25,9 @@ export function useRole() {
         // Partner group: realtor + third-party milestone-only roles (escrow/title).
         if (grants.some((g) => ['realtor', 'escrow', 'title'].includes(g.visibility))) roles.push('realtor')
         if (queue?.internal === true || ownedFiles.length) roles.push('lo')
-        setState({ loading: false, error: '', roles, grants, ownedFiles })
+        setState({ loading: false, error: '', roles, grants, ownedFiles, workspace: queue?.workspace || null })
       } catch (err) {
-        if (alive) setState({ loading: false, error: err?.message || 'Could not load your portal.', roles: [], grants: [], ownedFiles: [] })
+        if (alive) setState({ loading: false, error: err?.message || 'Could not load your portal.', roles: [], grants: [], ownedFiles: [], workspace: null })
       }
     }
     run()

@@ -14,21 +14,27 @@ import SendAssistant from '../components/SendAssistant'
 import { conversational1003Enabled } from '../features/conversational-1003/clientFlag'
 import { preUnderwritingEnabled } from '../features/pre-underwriting/clientFlag'
 
-export default function LODashboard({ files }) {
+export default function LODashboard({ files, workspace }) {
   const navigate = useNavigate()
+  const [ownerFilter, setOwnerFilter] = useState('all')
+  const displayFiles = useMemo(() => {
+    if (ownerFilter === 'all') return files
+    const filtered = files.filter((file) => file.ownerUserId === ownerFilter)
+    return filtered.length ? filtered : files
+  }, [files, ownerFilter])
 
   const summary = useMemo(() => {
     const byStage = {}
     let stuck = 0, pendingReview = 0
-    for (const f of files) {
+    for (const f of displayFiles) {
       byStage[f.stage] = (byStage[f.stage] || 0) + 1
       if (f.stuck) stuck++
       pendingReview += f.pendingReview || 0
     }
-    return { byStage, stuck, pendingReview, total: files.length }
-  }, [files])
+    return { byStage, stuck, pendingReview, total: displayFiles.length }
+  }, [displayFiles])
 
-  const stuckFiles = files.filter((f) => f.stuck)
+  const stuckFiles = displayFiles.filter((f) => f.stuck)
 
   return (
     <>
@@ -41,13 +47,19 @@ export default function LODashboard({ files }) {
         <Link to="/portal/new-file" className="btn btn-primary btn-sm">+ New loan file</Link>
       </div>
 
-      {/* First card on the page on purpose: this is the one thing that has to be reachable
-          without navigating, because it gets used mid-phone-call. */}
+      <AdminPortfolios
+        workspace={workspace}
+        selectedOwner={ownerFilter}
+        onSelectOwner={setOwnerFilter}
+      />
+
+      {/* First action card on the page: this has to stay reachable without navigating,
+          because it gets used mid-phone-call. */}
       <SendAssistant />
 
       <div className="card workspace-summary" id="review">
         <div className="metrics">
-          <div className="metric"><span className="lbl">Active files</span><span className="big-num">{summary.total}</span></div>
+          <div className="metric"><span className="lbl">Files you can open</span><span className="big-num">{summary.total}</span></div>
           <div className="metric"><span className="lbl">Docs to review</span><span className="big-num">{summary.pendingReview}</span></div>
           <div className="metric"><span className="lbl">Stuck files</span><span className="big-num" style={{ color: summary.stuck ? 'var(--red)' : undefined }}>{summary.stuck}</span></div>
         </div>
@@ -61,9 +73,9 @@ export default function LODashboard({ files }) {
       {/* Phase 1B (flag-gated): deterministic blockers + what changed today. */}
       {flag('loanTeamWorkspaceV2') && (() => {
         const nowMs = Date.now()
-        const blockers = blockerSummary(files)
-        const changedToday = filesChangedSince(files, nowMs)
-        const needAction = filesNeedingBorrowerAction(files)
+        const blockers = blockerSummary(displayFiles)
+        const changedToday = filesChangedSince(displayFiles, nowMs)
+        const needAction = filesNeedingBorrowerAction(displayFiles)
         return (
           <div className="card">
             <div className="card-head"><h2>Blockers &amp; today</h2></div>
@@ -106,18 +118,19 @@ export default function LODashboard({ files }) {
 
       <div className="card" id="pipeline">
         <div className="card-head"><h2>All active files</h2></div>
-        {files.length === 0 && <Empty>No active loan files yet. Files appear here as GRCRM deals sync in.</Empty>}
-        {files.length > 0 && (
+        {displayFiles.length === 0 && <Empty>No active loan files in this admin portfolio.</Empty>}
+        {displayFiles.length > 0 && (
           <div className="tablewrap">
             <table className="q">
               <thead>
                 <tr>
-                  <th>Borrower</th><th>Stage</th><th>Missing</th><th>To review</th>
+                  <th>Borrower</th>{workspace?.owners?.length > 1 && <th>Admin owner</th>}
+                  <th>1003</th><th>Stage</th><th>Missing</th><th>To review</th>
                   <th>Conditions</th><th>Next action</th><th>Close</th>
                 </tr>
               </thead>
               <tbody>
-                {files.map((f) => (
+                {displayFiles.map((f) => (
                   <tr key={f.loanFileId} onClick={() => navigate(`/portal/file/${f.loanFileId}`)}>
                     <td>
                       <strong>{f.borrowerName || '—'}</strong>
@@ -138,6 +151,12 @@ export default function LODashboard({ files }) {
                         )}
                       </div>
                     </td>
+                    {workspace?.owners?.length > 1 && <td className="owner-email-cell">{f.ownerEmail || '—'}</td>}
+                    <td>
+                      <span className={`chip ${applicationChip(f.application?.bucket)}`}>
+                        {applicationDisplay(f.application)}
+                      </span>
+                    </td>
                     <td>{f.stageLabel}</td>
                     <td>{f.missingDocs || '—'}</td>
                     <td>{f.pendingReview ? <span className="chip amber">{f.pendingReview}</span> : '—'}</td>
@@ -157,6 +176,86 @@ export default function LODashboard({ files }) {
       <div id="settings"><SiteSettingsCard /></div>
     </>
   )
+}
+
+function applicationChip(bucket) {
+  if (bucket === 'accepted' || bucket === 'attested') return 'green'
+  if (bucket === 'readyForBorrowerReview' || bucket === 'inProgress') return 'amber'
+  return 'gray'
+}
+
+function applicationDisplay(application) {
+  if (!application) return 'Not started'
+  if (application.bucket === 'inProgress' && application.percentComplete !== null) {
+    return `${application.label} · ${application.percentComplete}%`
+  }
+  return application.label
+}
+
+function AdminPortfolios({ workspace, selectedOwner, onSelectOwner }) {
+  const owners = workspace?.owners || []
+  if (!workspace?.identity) return null
+
+  return (
+    <div className="card admin-portfolios" id="admins">
+      <div className="card-head">
+        <h2>{workspace.platformAdmin ? 'Admin portfolios' : 'Your owner access'}</h2>
+        <span className="chip gray">{owners.length}</span>
+      </div>
+      <p className="muted mt0">
+        You are signed in as <b>{workspace.identity.email || 'a verified account'}</b>.
+        {' '}Each card is an operational total. File details remain limited to portfolios you own or were explicitly added to.
+      </p>
+      {owners.length > 1 && (
+        <button
+          type="button"
+          className={`admin-owner-card admin-owner-card--all ${selectedOwner === 'all' ? 'is-active' : ''}`}
+          onClick={() => onSelectOwner('all')}
+        >
+          <span>All administrator totals</span>
+          <strong>{owners.reduce((sum, owner) => sum + owner.fileCount, 0)} files</strong>
+        </button>
+      )}
+      <div className="admin-owner-grid">
+        {owners.map((owner) => (
+          <button
+            type="button"
+            className={`admin-owner-card ${selectedOwner === owner.userId ? 'is-active' : ''}`}
+            key={owner.userId || owner.email}
+            onClick={() => owner.userId && filesAreAccessible(owner.userId, workspace) && onSelectOwner(owner.userId)}
+            disabled={!owner.userId || !filesAreAccessible(owner.userId, workspace)}
+          >
+            <span className="admin-owner-email">
+              {owner.email || 'Verified owner'}
+              {owner.userId === workspace.identity.userId && <em>Current account</em>}
+            </span>
+            <strong>{owner.fileCount} file{owner.fileCount === 1 ? '' : 's'}</strong>
+            <span className="admin-owner-detail">
+              1003: {owner.applicationCounts.notStarted} not started · {owner.applicationCounts.inProgress} in progress
+              {' · '}{owner.applicationCounts.readyForBorrowerReview} ready · {owner.applicationCounts.attested} attested
+              {' · '}{owner.applicationCounts.accepted} accepted
+            </span>
+            <span className="admin-owner-detail">
+              {STAGE_STEPS.filter((stage) => owner.stageCounts[stage]).length
+                ? STAGE_STEPS.filter((stage) => owner.stageCounts[stage])
+                  .map((stage) => `${STAGE_LABEL[stage]} ${owner.stageCounts[stage]}`).join(' · ')
+                : 'No file stages yet'}
+            </span>
+            {workspace.platformAdmin && (
+              <span className="admin-owner-detail">Last sign-in: {relTime(owner.lastSignInAt)}</span>
+            )}
+          </button>
+        ))}
+      </div>
+      <p className="hint mb0">
+        New files and assistant links are owned by the account that creates them. To open another admin’s files, add your account to that admin’s team.
+      </p>
+    </div>
+  )
+}
+
+function filesAreAccessible(ownerUserId, workspace) {
+  return workspace?.accessibleOwnerIds?.includes(ownerUserId) ?? false
 }
 
 // Site settings: the owner edits the live rate, loan programs, and home marketing

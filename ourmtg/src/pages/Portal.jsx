@@ -48,7 +48,7 @@ function InvitePaste() {
 
 export default function Portal() {
   const { user } = useAuth()
-  const { loading, error, roles, grants, ownedFiles } = useRole()
+  const { loading, error, roles, grants, ownedFiles, workspace } = useRole()
   const [params, setParams] = useSearchParams()
   // Read once per mount: redeeming navigates away, and a value that changed underneath would
   // re-trigger the redirect.
@@ -134,7 +134,11 @@ export default function Portal() {
       )}
       {active === 'borrower' && <div className="borrower-workspace"><BorrowerDashboard grants={grants.filter((g) => g.visibility === 'borrower' || g.visibility === 'coborrower')} /></div>}
       {active === 'realtor' && <div className="borrower-workspace"><RealtorPortal grants={grants.filter((g) => ['realtor', 'escrow', 'title'].includes(g.visibility))} /></div>}
-      {active === 'lo' && <InternalWorkspace><LODashboard files={ownedFiles} /></InternalWorkspace>}
+      {active === 'lo' && (
+        <InternalWorkspace workspace={workspace}>
+          <LODashboard files={ownedFiles} workspace={workspace} />
+        </InternalWorkspace>
+      )}
     </>
   )
 }

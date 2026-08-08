@@ -304,6 +304,9 @@ table.q tr:hover td { background: #f0ede4; cursor: pointer; }
   margin: 0 -28px 26px; padding: 0 28px; background: #fff; border-bottom: 1px solid #d2d8e1;
   font: 600 9.5px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: #68758a;
 }
+.workspace-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.workspace-identity b { color: #24344c; text-transform: none; letter-spacing: 0; overflow-wrap: anywhere; }
+.workspace-identity small { padding-left: 10px; border-left: 1px solid #d2d8e1; font: inherit; }
 .workspace-secure { color: #2e7254; }
 .workspace-page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 22px; }
 .workspace-page-head h1 { font-size: clamp(28px, 3.5vw, 42px); color: #122039; }
@@ -313,6 +316,21 @@ table.q tr:hover td { background: #f0ede4; cursor: pointer; }
 .workspace-content table.q th { border-bottom-color: #8c98aa; }
 .workspace-content table.q tr:hover td { background: #f2f5f8; }
 .workspace-summary { border-top: 3px solid #183d6c !important; }
+.admin-portfolios { scroll-margin-top: 70px; }
+.admin-owner-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin: 12px 0; }
+.admin-owner-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 7px; width: 100%; padding: 14px;
+  border: 1px solid #c5ccd6; border-radius: 6px; background: #f8fafc; color: var(--ink);
+  font-family: var(--sans); text-align: left; cursor: pointer;
+}
+.admin-owner-card:hover, .admin-owner-card.is-active { border-color: #183d6c; box-shadow: inset 3px 0 #183d6c; }
+.admin-owner-card:disabled { cursor: default; opacity: .7; }
+.admin-owner-card--all { flex-direction: row; justify-content: space-between; margin: 12px 0 0; }
+.admin-owner-email { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; font-weight: 700; overflow-wrap: anywhere; }
+.admin-owner-email em { padding: 3px 6px; border-radius: 999px; background: #dfe9f6; color: #183d6c; font: 600 8px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+.admin-owner-card strong { color: #122039; font-size: 22px; }
+.admin-owner-detail { color: #68758a; font-size: 11.5px; line-height: 1.45; }
+.owner-email-cell { max-width: 180px; overflow-wrap: anywhere; font-size: 12px; }
 
 /* Statement Income Analysis */
 .statement-panel { scroll-margin-top: 70px; }
@@ -348,6 +366,8 @@ table.q tr:hover td { background: #f0ede4; cursor: pointer; }
   .workspace-rule { display: none; }
   .workspace-content { padding: 0 16px 48px; }
   .workspace-topline { margin: 0 -16px 22px; padding: 0 16px; }
+  .workspace-identity { align-items: flex-start; flex-direction: column; gap: 4px; padding: 10px 0; }
+  .workspace-identity small { padding-left: 0; border-left: 0; }
   .grid4, .analysis-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .analysis-metrics > div:nth-child(2) { border-right: 0; }
   .analysis-metrics > div:nth-child(-n+2) { border-bottom: 1px solid #d6dce4; }

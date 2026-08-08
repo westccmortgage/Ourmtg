@@ -116,6 +116,20 @@ export function createFakeSupabase({ tables = {}, users = {}, storage = {} } = {
       return json(user)
     }
 
+    // ── GoTrue admin: resolve verified identities for owner/admin portfolio tests ──
+    if (u.pathname === '/auth/v1/admin/users' && method === 'GET') {
+      const unique = [...new Map(Object.values(users).map((user) => [user.id, user])).values()]
+      const page = Number(u.searchParams.get('page') || 1)
+      const perPage = Number(u.searchParams.get('per_page') || 50)
+      const start = Math.max(0, page - 1) * perPage
+      return json({ users: unique.slice(start, start + perPage), aud: 'authenticated' })
+    }
+    if (u.pathname.startsWith('/auth/v1/admin/users/') && method === 'GET') {
+      const id = decodeURIComponent(u.pathname.split('/').pop())
+      const user = Object.values(users).find((candidate) => candidate.id === id)
+      return user ? json({ user }) : json({ message: 'User not found' }, 404)
+    }
+
     // ── Storage: object download ────────────────────────────────────────────
     if (u.pathname.startsWith('/storage/v1/object/')) {
       const path = decodeURIComponent(u.pathname.replace(/^\/storage\/v1\/object\/(authenticated\/)?/, ''))
