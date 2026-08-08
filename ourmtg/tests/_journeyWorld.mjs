@@ -119,7 +119,8 @@ function routedModel() {
     const body = JSON.parse(init.body)
     calls.push(body)
     const b64 = body.messages[0].content[0].source.data
-    const tag = Buffer.from(b64, 'base64').toString('utf8').replace(/[^A-Z0-9]/g, '')
+    const raw = Buffer.from(b64, 'base64').toString('utf8')
+    const tag = Object.keys(READINGS).find((candidate) => raw.includes(candidate))
     const reading = READINGS[tag]
     if (!reading) throw new Error(`model stub got an unexpected document: ${tag}`)
     return {
@@ -154,7 +155,10 @@ function buildWorld() {
     },
   })
   for (const d of Object.values(DOCS)) {
-    fake.putFile(d.path, Buffer.from(d.tag), d.path.endsWith('.png') ? 'image/png' : 'application/pdf')
+    const bytes = d.path.endsWith('.png')
+      ? Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from(d.tag)])
+      : Buffer.from(`%PDF-1.4\n${d.tag}`)
+    fake.putFile(d.path, bytes, d.path.endsWith('.png') ? 'image/png' : 'application/pdf')
   }
   return fake
 }

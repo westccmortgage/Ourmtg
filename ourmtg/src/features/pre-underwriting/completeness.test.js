@@ -125,6 +125,29 @@ test('W-2s need two distinct years', () => {
   assert.equal(assessCompleteness('w2_2yr', [{ taxYear: 2025 }, { taxYear: 2024 }], at).complete, true)
 })
 
+test('a complete tax package needs two years, each 1040, and the controlling business return', () => {
+  const oneYear = assessCompleteness('tax_return_full', [{
+    pagesPresent: 20, pagesTotal: 20, taxYears: [2025],
+    taxForms: [
+      { formType: '1040', taxYear: 2025 },
+      { formType: 'k1_1120s', taxYear: 2025, entityName: 'North Coast Inc', ownershipPercent: 50 },
+    ],
+  }])
+  assert.equal(oneYear.complete, false)
+  assert.ok(oneYear.gaps.some((g) => g.code === 'missing_tax_years'))
+  assert.ok(oneYear.gaps.some((g) => g.code === 'missing_business_return'))
+
+  const complete = assessCompleteness('tax_return_full', [{
+    pagesPresent: 40, pagesTotal: 40, taxYears: [2024, 2025],
+    taxForms: [
+      { formType: '1040', taxYear: 2024 }, { formType: '1040', taxYear: 2025 },
+      { formType: 'k1_1120s', taxYear: 2025, entityName: 'North Coast Inc', ownershipPercent: 50 },
+      { formType: '1120s', taxYear: 2025, entityName: 'North Coast Inc' },
+    ],
+  }])
+  assert.deepEqual(complete, { complete: true, gaps: [] })
+})
+
 // ── contracts ───────────────────────────────────────────────────────────────
 test('an unsigned contract is incomplete; unknown signing is not assumed bad', () => {
   assert.ok(codes(assessCompleteness('purchase_contract', [{ signedByAllParties: false }], at)).includes('unsigned'))

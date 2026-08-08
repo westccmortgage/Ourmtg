@@ -18,6 +18,7 @@
 
 import { getDocumentType } from './documentCatalog.js'
 import { toPart, toEvidence, toCreditLiabilities } from './extractionContract.js'
+import { analyzeTaxReturns } from './taxIncome.js'
 
 /**
  * @param {object} input
@@ -43,6 +44,7 @@ export function buildAnalysisContext(input = {}) {
     documents,
     extractions,
     creditLiabilities: toCreditLiabilities(live),
+    taxIncome: analyzeTaxReturns(live, { asOf: input.asOf }),
     deposits: depositsFrom(live),
     employment: employmentFrom(documents, input.application),
     application: input.application || {},

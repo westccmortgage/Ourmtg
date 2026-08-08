@@ -42,6 +42,8 @@ async function call(path, { method = 'GET', body, auth = true } = {}) {
 }
 
 // ── Portal user (borrower / co-borrower / realtor) ───────────────────────────
+export const getWorkspaceSecurityStatus = () => call('portal-security-status')
+
 export const acceptInvite = (token) =>
   call('portal-invite-accept', { method: 'POST', body: { token } })
 

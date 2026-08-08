@@ -214,6 +214,8 @@ export function setTestEnv(extra = {}) {
   process.env.VITE_SUPABASE_URL = 'https://fake.supabase.co'
   process.env.VITE_SUPABASE_ANON_KEY = 'anon-key'
   process.env.OURMTG_SECURE_FIELD_KEY = 'test-secure-key'
+  // Security rollout is explicit. Keep endpoint suites isolated from any parent-shell value.
+  process.env.OURMTG_INTERNAL_AAL2_ENFORCED = 'false'
   for (const [k, v] of Object.entries(extra)) {
     if (v === undefined) delete process.env[k]
     else process.env[k] = v

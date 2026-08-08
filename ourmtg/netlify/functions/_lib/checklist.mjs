@@ -86,10 +86,15 @@ export function checklistFor({ loanType, purpose } = {}) {
 // Whether a doc_key is valid for a given loan file — guards the upload endpoint so a
 // borrower can't create arbitrary document slots.
 export function isValidDocKey({ loanType, purpose }, docKey) {
+  // Tax returns are conditional on the borrower's income profile rather than loan type. They are
+  // intentionally not placed on every borrower's default checklist, but the internal upload
+  // control may create this known slot when a processor has a return in hand.
+  if (docKey === 'tax_return_full') return true
   return checklistFor({ loanType, purpose }).some((d) => d.doc_key === docKey)
 }
 
 export function labelForDocKey({ loanType, purpose }, docKey) {
+  if (docKey === 'tax_return_full') return 'Complete federal tax returns — personal and business'
   return checklistFor({ loanType, purpose }).find((d) => d.doc_key === docKey)?.label || docKey
 }
 

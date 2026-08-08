@@ -16,8 +16,9 @@
 //      of two doors, not the only one.
 
 import { DOCUMENT_TYPES } from './documentCatalog.js'
+import { TAX_FORM_TYPES, TAX_LINE_DEFINITIONS } from './taxReturnContract.js'
 
-export const EXTRACTION_PROMPT_VERSION = 'pu-extract-1'
+export const EXTRACTION_PROMPT_VERSION = 'pu-extract-2-tax-return'
 
 export const EXTRACTION_SYSTEM_PROMPT = `You read mortgage documents and report what they say. You make no decisions.
 
@@ -90,6 +91,29 @@ export function buildExtractionInstruction(opts = {}) {
   lines.push('bank app credit widget — rather than a merged report pulled from the three')
   lines.push('repositories for a mortgage. They look similar and are not interchangeable, so')
   lines.push('report which one it is and let the rules decide what that means.')
+
+  lines.push('')
+  lines.push('COMPLETE TAX RETURNS. For tax_return_full, return two additional arrays:')
+  lines.push('  taxForms — inventory every supported form actually present, including its taxYear,')
+  lines.push('    pageStart/pageEnd, taxpayer or entity, ownershipPercent when printed, and confidence.')
+  lines.push(`    Supported formType values: ${TAX_FORM_TYPES.join(', ')}.`)
+  lines.push('  taxLineItems — transcribe every supported income-analysis line actually present. Each')
+  lines.push('    item needs the exact lineKey below, matching formType, taxYear, signed amount, printed')
+  lines.push('    lineLabel, PDF page, taxpayer/entity/property when printed, and confidence.')
+  lines.push('  Parentheses are negative. Do not net, annualize, add back, reconcile, decide whether an')
+  lines.push('  item is recurring, or copy a total into a missing line. Code performs every calculation.')
+  lines.push('  A source form and its controlling return may both contain the same income. Transcribe both;')
+  lines.push('  code prevents double counting. If a form or line is not in these lists, omit it and mention')
+  lines.push('  that unsupported material exists in notes. Never invent a close lineKey.')
+  lines.push('  For every other document type, omit taxForms and taxLineItems (or return empty arrays).')
+  lines.push('')
+  lines.push('  TAX LINE VOCABULARY BY FORM:')
+  for (const formType of TAX_FORM_TYPES) {
+    const keys = Object.values(TAX_LINE_DEFINITIONS)
+      .filter((d) => d.formTypes.includes(formType))
+      .map((d) => d.key)
+    if (keys.length) lines.push(`    ${formType}: ${keys.join(', ')}`)
+  }
 
   if (opts.expectedDocKey) {
     lines.push('')

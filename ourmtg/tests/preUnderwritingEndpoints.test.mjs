@@ -80,6 +80,9 @@ async function load(env = {}) {
     PRE_UNDERWRITING_ENABLED: 'true',
     CONVERSATIONAL_1003_ENABLED: 'true',
     ANTHROPIC_API_KEY: 'test-key-not-real',
+    OURMTG_DOCUMENT_SCAN_PROVIDER: 'mock',
+    OURMTG_ALLOW_MOCK_SCAN: 'true',
+    OURMTG_MOCK_SCAN_STATUS: 'clean',
     ...env,
   })
   bust++
@@ -211,8 +214,8 @@ test('an unreadable upload fails with something a person can act on, and loses n
     const res = await h.intake(post({ loanFileId: LOAN, documentId: DOC, idempotencyKey: key('heic') }))
     assert.equal(res.status, 422)
     const body = await res.json()
-    assert.equal(body.code, 'unsupported_media_type')
-    assert.match(body.error, /HEIC/i)
+    assert.equal(body.code, 'unsupported_file_content')
+    assert.match(body.error, /supported PDF/i)
     // The document is untouched and still on the file, waiting.
     assert.equal(fake.rowsOf('loan_documents')[0].status, 'uploaded')
     assert.equal(fake.rowsOf('document_extractions').length, 0)
@@ -248,6 +251,54 @@ test('a model that invents a document type stores no fields at all', async () =>
     assert.equal(body.extraction.proposedDocKey, 'crypto_statement')
     assert.equal(body.extraction.fieldCount, 0)
     assert.equal(body.extraction.needsHumanReview, true)
+  } finally { restore() }
+})
+
+test('a complete tax-return package persists and reaches the internal source-linked income report', async () => {
+  const tables = TABLES()
+  tables.loan_documents[0] = {
+    ...tables.loan_documents[0], doc_key: 'tax_return_full', label: 'Complete tax returns',
+    storage_path: 'files/tax-return.pdf',
+  }
+  const fake = createFakeSupabase({ tables, users: USERS })
+  fake.putFile('files/tax-return.pdf', Buffer.from('%PDF-1.4 tax package'), 'application/pdf')
+  const model = stubModel(MODEL_REPLY({
+    docKey: 'tax_return_full', docKeyConfidence: 0.99,
+    fields: [
+      { name: 'pagesPresent', value: 20, confidence: 0.99 },
+      { name: 'pagesTotal', value: 20, confidence: 0.99 },
+    ],
+    taxForms: [
+      { formType: '1040', taxYear: 2024, taxpayerName: 'Daria N', pageStart: 1, pageEnd: 2, confidence: 0.99 },
+      { formType: '1040', taxYear: 2025, taxpayerName: 'Daria N', pageStart: 11, pageEnd: 12, confidence: 0.99 },
+    ],
+    taxLineItems: [
+      { lineKey: 'form1040_wages', formType: '1040', taxYear: 2024, amount: 100000, taxpayerName: 'Daria N', page: 1, lineLabel: 'Wages, salaries, tips', confidence: 0.98 },
+      { lineKey: 'form1040_wages', formType: '1040', taxYear: 2025, amount: 120000, taxpayerName: 'Daria N', page: 11, lineLabel: 'Wages, salaries, tips', confidence: 0.98 },
+    ],
+  }))
+  const restore = install(fake, model)
+  try {
+    const h = await load()
+    const read = await h.intake(post({ loanFileId: LOAN, documentId: DOC, idempotencyKey: key('tax') }))
+    assert.equal(read.status, 200)
+    const readBody = await read.json()
+    assert.equal(readBody.extraction.docKey, 'tax_return_full')
+    assert.equal(readBody.extraction.taxFormCount, 2)
+    assert.equal(readBody.extraction.taxLineItemCount, 2)
+
+    const stored = fake.rowsOf('document_extractions')[0]
+    assert.equal(stored.fields.taxForms.length, 2)
+    assert.equal(stored.fields.taxLineItems.length, 2)
+    assert.equal(stored.fields.taxLineItems[1].amount, 120000)
+
+    const panel = await (await h.review(makeRequest(panelUrl(), { token: 'tok-owner' }))).json()
+    assert.equal(panel.audience, 'team')
+    assert.equal(panel.taxIncome.status, 'prepared_for_review')
+    assert.equal(panel.taxIncome.comparison.calculatedAnnual, 110000)
+    assert.equal(panel.taxIncome.comparison.calculatedMonthly, 9166.67)
+    assert.equal(panel.taxIncome.qualifyingIncome.monthly, null)
+    assert.equal(panel.taxIncome.years[1].sources[0].evidence[0].page, 11)
   } finally { restore() }
 })
 
@@ -550,7 +601,7 @@ function creditTables() {
 
 test('import writes the missing obligations into the 1003 through the reducer, as imported_credit', async () => {
   const fake = createFakeSupabase({ tables: creditTables(), users: USERS })
-  fake.putFile('files/credit.pdf', Buffer.from('%PDF'), 'application/pdf')
+  fake.putFile('files/credit.pdf', Buffer.from('%PDF-1.4 CREDIT'), 'application/pdf')
   const restore = install(fake, stubModel(CREDIT_REPLY))
   try {
     const h = await load({ CONVERSATIONAL_1003_ENABLED: 'true' })
@@ -584,7 +635,7 @@ test('import writes the missing obligations into the 1003 through the reducer, a
 
 test('importing twice is a no-op the second time, not a duplicate section', async () => {
   const fake = createFakeSupabase({ tables: creditTables(), users: USERS })
-  fake.putFile('files/credit.pdf', Buffer.from('%PDF'), 'application/pdf')
+  fake.putFile('files/credit.pdf', Buffer.from('%PDF-1.4 CREDIT'), 'application/pdf')
   const restore = install(fake, stubModel(CREDIT_REPLY))
   try {
     const h = await load({ CONVERSATIONAL_1003_ENABLED: 'true' })
@@ -604,7 +655,7 @@ test('importing twice is a no-op the second time, not a duplicate section', asyn
 
 test('the panel shows the reconciliation before anything is written', async () => {
   const fake = createFakeSupabase({ tables: creditTables(), users: USERS })
-  fake.putFile('files/credit.pdf', Buffer.from('%PDF'), 'application/pdf')
+  fake.putFile('files/credit.pdf', Buffer.from('%PDF-1.4 CREDIT'), 'application/pdf')
   const restore = install(fake, stubModel(CREDIT_REPLY))
   try {
     const h = await load({ CONVERSATIONAL_1003_ENABLED: 'true' })
@@ -620,7 +671,7 @@ test('the panel shows the reconciliation before anything is written', async () =
 
 test('after the import, undisclosed_liability findings clear on the same response', async () => {
   const fake = createFakeSupabase({ tables: creditTables(), users: USERS })
-  fake.putFile('files/credit.pdf', Buffer.from('%PDF'), 'application/pdf')
+  fake.putFile('files/credit.pdf', Buffer.from('%PDF-1.4 CREDIT'), 'application/pdf')
   const restore = install(fake, stubModel(CREDIT_REPLY))
   try {
     const h = await load({ CONVERSATIONAL_1003_ENABLED: 'true' })
@@ -648,7 +699,7 @@ test('an import with no credit report on file is refused with a reason', async (
 
 test('an attested application is not silently modified by an import', async () => {
   const fake = createFakeSupabase({ tables: creditTables(), users: USERS })
-  fake.putFile('files/credit.pdf', Buffer.from('%PDF'), 'application/pdf')
+  fake.putFile('files/credit.pdf', Buffer.from('%PDF-1.4 CREDIT'), 'application/pdf')
   fake.rowsOf('mortgage_applications').push({
     id: '99999999-9999-4999-8999-999999999999', loan_file_id: LOAN, application_version: 1,
     status: 'borrower_attested', schema_version: 'v', catalog_version: 'v', rules_version: 'v',
@@ -669,7 +720,7 @@ test('the borrower-reachable surface never carries document contents', async () 
   // endpoints. This pins the one borrower-reachable endpoint in the feature to that guarantee —
   // if someone ever adds extraction data to it, this is the test that goes red.
   const fake = createFakeSupabase({ tables: creditTables(), users: USERS })
-  fake.putFile('files/credit.pdf', Buffer.from('%PDF'), 'application/pdf')
+  fake.putFile('files/credit.pdf', Buffer.from('%PDF-1.4 CREDIT'), 'application/pdf')
   const restore = install(fake, stubModel(CREDIT_REPLY))
   try {
     const h = await load({ CONVERSATIONAL_1003_ENABLED: 'true' })

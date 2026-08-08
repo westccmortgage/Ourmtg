@@ -51,6 +51,18 @@ export const DOCUMENT_TYPES = Object.freeze({
     completeness: { taxYears: 2, mostRecentYears: true },
     extract: ['taxYear', 'employerName', 'employerEIN', 'employeeName', 'wagesTipsOther'],
   },
+  tax_return_full: {
+    key: 'tax_return_full',
+    label: 'Complete federal tax returns — personal and business',
+    hints: [
+      'u.s. individual income tax return', 'form 1040', 'schedule c', 'schedule e',
+      'schedule f', 'schedule k-1', 'form 1120', 'form 1120-s', 'form 1065', 'form 8825',
+    ],
+    // Page completeness belongs here; form/year/entity completeness is richer than scalar catalog
+    // rules and is computed by taxIncome.js from the closed taxForms inventory.
+    completeness: { allPages: true, taxYears: 2, taxPackage: true },
+    extract: ['taxpayerName', 'filingStatus'],
+  },
   bank_2mo: {
     key: 'bank_2mo',
     label: 'Bank statements — 2 most recent months',

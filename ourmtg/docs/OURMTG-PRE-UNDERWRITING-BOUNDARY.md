@@ -19,6 +19,7 @@ and only the reviewed summary reaches the borrower.
 | That something needs explaining (e.g. a gap, a deposit) | yes, as a request | yes, with the finding |
 | Readiness score | no | yes |
 | Calculated qualifying income, DTI, LTV, reserves, cash to close | only after review | yes |
+| Tax-return forms, income worksheet, add-backs, ownership and trend | no | yes, pending confirmation |
 | Risk findings (large deposits, NSF, undisclosed liabilities, inconsistencies) | no | yes |
 | Program suitability / recommendations | no | yes |
 | Credit score, or anything derived from the credit report | **never, from this system** | yes |
@@ -84,6 +85,23 @@ that perform them stay separate actions, as `loan_files.preapproval_*` already i
 | Programs are suitability, not eligibility | `programFit.js` returns the guideline each comparison used and a `notChecked` list; nothing is ruled out on a number nobody has |
 | Numbers are null rather than estimated | `qualifyingFacts.js` — every figure returns null with a reason when an input is missing |
 | The credit score is the middle of three | `representativeScore` — averaging qualifies people who do not qualify |
+| Tax returns prepare income but never qualify it | `taxReturnContract.js` closes the form/line vocabulary; `taxIncome.js` owns arithmetic and always returns final `qualifyingIncome` as null pending human confirmation |
+
+### Complete tax-return packages prepare a worksheet, not a decision
+
+Added 2026-08-08. A `tax_return_full` upload can contain two years of personal and business
+returns. The model inventories supported forms and transcribes only allowlisted, page-linked
+lines. It does not choose an add-back, decide that income recurs, apply ownership, average years,
+or resolve conflicting copies. `taxIncome.js` performs those operations deterministically and
+fails closed on missing ownership, missing entity returns, gross 1099 receipts without expense
+schedules, and conflicting source lines.
+
+The team panel shows the resulting annual/monthly calculation as **pending human review**, with
+every source page, confidence, adjustment, reconciliation and missing input. It deliberately does
+not feed that number into DTI and the report's `qualifyingIncome` remains null. A licensed person
+must confirm continuance, business access/stability and the selected investor's treatment before
+the amount can become qualifying income. The full contract and current limitations are in
+`docs/OURMTG-TAX-RETURN-INCOME.md`.
 
 ### Credit liabilities flow into the 1003 — planned, shown, then written
 
@@ -114,3 +132,8 @@ the ratios are computed from and what the borrower attests to. The import:
   collected; the extraction reads statement totals, not the ledger. An empty deposit list means
   "we have not looked", never "there is nothing there", and the rule is written so absence
   produces no finding.
+- **Live tax-return evaluation.** The tax package contract and arithmetic are fixture- and
+  endpoint-tested, but have not yet been run on real IRS PDFs, scanned returns, phone photos or
+  tax-software packages. No production flag should be widened on this feature until that eval is
+  complete and the first reports have been compared line-by-line with a licensed reviewer's
+  worksheet.

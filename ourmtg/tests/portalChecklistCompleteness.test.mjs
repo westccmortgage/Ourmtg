@@ -15,6 +15,7 @@ async function load() {
   setTestEnv({
     PRE_UNDERWRITING_ENABLED: 'true', CONVERSATIONAL_1003_ENABLED: 'true',
     ANTHROPIC_API_KEY: 'test-key-not-real',
+    OURMTG_DOCUMENT_SCAN_PROVIDER: 'mock', OURMTG_ALLOW_MOCK_SCAN: 'true',
   })
   bust++
   return {

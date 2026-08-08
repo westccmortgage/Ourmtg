@@ -7,6 +7,7 @@
 
 import { randomUUID, createHash } from 'node:crypto'
 import { getDocumentType } from '../../../src/features/pre-underwriting/documentCatalog.js'
+import { inspectDocumentBytes } from './upload-policy.mjs'
 
 export const newId = () => randomUUID()
 
@@ -40,12 +41,14 @@ export async function downloadDocument(svc, doc) {
   if (buf.byteLength === 0) return { ok: false, code: 'empty_file' }
   if (buf.byteLength > MAX_DOCUMENT_BYTES) return { ok: false, code: 'file_too_large' }
 
+  const inspected = inspectDocumentBytes(buf, { declaredContentType: data.type || null })
+  if (!inspected.ok) return { ok: false, code: inspected.code }
+
   return {
     ok: true,
     dataBase64: buf.toString('base64'),
-    // Storage reports what was uploaded; the path extension is only a fallback, because a
-    // borrower's phone will happily name a HEIC "photo.jpg".
-    mediaType: data.type || mediaTypeFromPath(doc.storage_path),
+    // The actual bytes own the type. Storage metadata and path extensions are untrusted inputs.
+    mediaType: inspected.detectedContentType || data.type || mediaTypeFromPath(doc.storage_path),
     bytes: buf.byteLength,
   }
 }
@@ -70,10 +73,13 @@ export async function saveExtraction(svc, { loanFile, document, value, meta, act
     expected_doc_key: value.expectedDocKey,
     doc_key_mismatch: Boolean(value.docKeyMismatch),
     legible: value.legible !== false,
-    // Tradelines ride with the fields rather than in a column of their own: they are read as a
-    // set with them, and a separate column would be a second place to forget to supersede.
-    fields: { fields: value.fields || [], tradelines: value.tradelines || [] },
-    field_count: (value.fields || []).length,
+    // Repeated structures ride with the scalar fields in the versioned JSON payload. A separate
+    // table/column for each form family would be another place to forget to supersede on re-read.
+    fields: {
+      fields: value.fields || [], tradelines: value.tradelines || [],
+      taxForms: value.taxForms || [], taxLineItems: value.taxLineItems || [],
+    },
+    field_count: (value.fields || []).length + (value.taxLineItems || []).length,
     min_field_confidence: value.minFieldConfidence,
     rejected: meta?.rejected || [],
     notes: value.notes,
@@ -127,6 +133,8 @@ const fromRow = (r) => ({
   legible: r.legible,
   fields: r.fields?.fields || [],
   tradelines: r.fields?.tradelines || [],
+  taxForms: r.fields?.taxForms || [],
+  taxLineItems: r.fields?.taxLineItems || [],
   minFieldConfidence: r.min_field_confidence,
   notes: r.notes,
   needsHumanReview: r.needs_human_review,
@@ -265,5 +273,5 @@ const dedupeKeyOf = (f) => f.id || f.rule
 
 // Versions travel with every row so a finding produced last quarter can still be explained
 // after the rules and the catalog have both moved on.
-export const CATALOG_VERSION = 'pu-catalog-1'
+export const CATALOG_VERSION = 'pu-catalog-2-tax-return'
 export const RULES_VERSION = 'pu-rules-1'

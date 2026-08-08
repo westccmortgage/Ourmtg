@@ -27,6 +27,7 @@ setTestEnv({
   CONVERSATIONAL_1003_ENABLED: 'true',
   PRE_UNDERWRITING_ENABLED: 'true',
   ANTHROPIC_API_KEY: 'test-key-not-real',
+  OURMTG_DOCUMENT_SCAN_PROVIDER: 'mock', OURMTG_ALLOW_MOCK_SCAN: 'true',
   OURMTG_ADMIN_EMAILS: 'lo@wcc.com',
 })
 const fake = buildWorld()

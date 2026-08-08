@@ -54,6 +54,7 @@ export default async (req) => {
       .is('superseded_by', null)
     const parts = groupParts((reads || []).map((r) => ({
       docKey: r.doc_key, fields: r.fields?.fields || [], tradelines: [],
+      taxForms: r.fields?.taxForms || [], taxLineItems: [],
     })))
     gapsByKey = Object.fromEntries(Object.keys(parts).map((k) => {
       const a = assessCompleteness(k, parts[k])

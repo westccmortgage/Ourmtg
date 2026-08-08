@@ -2,9 +2,10 @@
 //
 // Financial documents are borrower-provided. We accept only a small allowlist of viewable
 // document/image types and reject active/dangerous types (HTML/SVG can carry script;
-// executables are never expected). This is DECLARED-type + filename hygiene — it is NOT
-// content sniffing and NOT malware scanning (neither exists yet; see ScanProvider and the
-// remaining-risk note in the security report). Server-controlled object paths
+// executables are never expected). The signed-URL request uses declared-type + filename
+// hygiene; completion and pre-underwriting use the byte-signature inspection below. Malware
+// scanning is a separate provider boundary because a magic number is not an antivirus engine.
+// Server-controlled object paths
 // (_lib/portal.storageDocPath) already prevent path escape regardless of filename.
 
 // Accepted MIME types for borrower documents.
@@ -60,4 +61,75 @@ export function validateUpload({ contentType, filename } = {}) {
     return { ok: false, error: 'Unsupported file type. Upload a PDF, JPG, PNG, or HEIC.' }
   }
   return { ok: true }
+}
+
+const PDF = Uint8Array.from([0x25, 0x50, 0x44, 0x46, 0x2d])
+const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+const JPEG = Uint8Array.from([0xff, 0xd8, 0xff])
+const HEIF_BRANDS = new Set([
+  'heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'hevm', 'hevs', 'mif1', 'msf1',
+])
+
+function startsWith(bytes, signature) {
+  if (bytes.length < signature.length) return false
+  return signature.every((value, index) => bytes[index] === value)
+}
+
+function ascii(bytes, start, end) {
+  return String.fromCharCode(...bytes.subarray(start, end))
+}
+
+/**
+ * Detect an allowed financial-document type from its bytes, never its filename or HTTP header.
+ * This deliberately recognizes only formats the rest of the product can render/read. Unknown
+ * input is null: a plausible extension must never turn arbitrary bytes into a mortgage document.
+ */
+export function sniffDocumentMime(input) {
+  const bytes = input instanceof Uint8Array ? input : new Uint8Array(input || [])
+  if (startsWith(bytes, PDF)) return 'application/pdf'
+  if (startsWith(bytes, PNG)) return 'image/png'
+  if (startsWith(bytes, JPEG)) return 'image/jpeg'
+
+  // HEIC/HEIF are ISO base-media files. `ftyp` begins at byte 4 and the major or compatible
+  // brand must identify a HEIF family; accepting every ISO-BMFF file would also accept video.
+  if (bytes.length >= 12 && ascii(bytes, 4, 8) === 'ftyp') {
+    const brands = [ascii(bytes, 8, 12)]
+    for (let offset = 16; offset + 4 <= Math.min(bytes.length, 64); offset += 4) {
+      brands.push(ascii(bytes, offset, offset + 4))
+    }
+    const brand = brands.find((value) => HEIF_BRANDS.has(value))
+    if (brand) return brand.startsWith('hei') ? 'image/heic' : 'image/heif'
+  }
+  return null
+}
+
+function sameDocumentMime(declared, detected) {
+  const a = String(declared || '').toLowerCase().split(';')[0].trim()
+  if (!a) return true
+  if (a === detected) return true
+  return ['image/heic', 'image/heif'].includes(a)
+    && ['image/heic', 'image/heif'].includes(detected)
+}
+
+/** Verify actual bytes and, when supplied, require the declared MIME to agree with them. */
+export function inspectDocumentBytes(input, { declaredContentType = null } = {}) {
+  const bytes = input instanceof Uint8Array ? input : new Uint8Array(input || [])
+  if (bytes.byteLength === 0) return { ok: false, code: 'empty_file', error: 'The uploaded file is empty.' }
+  const detectedContentType = sniffDocumentMime(bytes)
+  if (!detectedContentType) {
+    return {
+      ok: false,
+      code: 'unsupported_file_content',
+      error: 'The uploaded file is not a supported PDF, JPG, PNG, or HEIC document.',
+    }
+  }
+  if (!sameDocumentMime(declaredContentType, detectedContentType)) {
+    return {
+      ok: false,
+      code: 'content_type_mismatch',
+      error: 'The file contents do not match the file type reported by the upload.',
+      detectedContentType,
+    }
+  }
+  return { ok: true, detectedContentType }
 }

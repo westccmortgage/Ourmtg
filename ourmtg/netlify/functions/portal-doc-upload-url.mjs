@@ -29,10 +29,10 @@ export default async (req) => {
   if (body.documentId != null && !isUuid(body.documentId)) return json({ ok: false, error: 'Invalid documentId' }, 400)
 
   if (body.filename && hasDangerousExtension(body.filename)) return json({ ok: false, error: 'This file type is not allowed' }, 400)
-  if (body.contentType) {
-    const v = validateUpload({ contentType: body.contentType, filename: body.filename })
-    if (!v.ok) return json({ ok: false, error: v.error }, 400)
-  }
+  // The current client always sends both values. Refuse unknown types instead of preserving the
+  // old compatibility gap; completion independently verifies the actual bytes.
+  const v = validateUpload({ contentType: body.contentType, filename: body.filename })
+  if (!v.ok) return json({ ok: false, error: v.error }, 400)
 
   const route = docTaskLinkDecision(body.taskId, taskPilotEnabled())
   if (route.mode === 'error') return json({ ok: false, error: route.error }, route.status)

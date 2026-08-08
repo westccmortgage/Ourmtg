@@ -168,7 +168,26 @@ test('a clean read comes back validated and coerced', async () => {
   assert.equal(r.value.docKey, 'bank_2mo')
   assert.equal(r.value.needsHumanReview, false)
   assert.equal(r.value.fields.find((f) => f.name === 'endingBalance').value, 41204.55)
-  assert.equal(r.meta.promptVersion, 'pu-extract-1')
+  assert.equal(r.meta.promptVersion, 'pu-extract-2-tax-return')
+})
+
+test('a full tax return gets the expanded source-line contract and output budget', async () => {
+  const fetchImpl = stubFetch(jsonRes(goodPayload({
+    docKey: 'tax_return_full', docKeyConfidence: 0.99, fields: [],
+    taxForms: [], taxLineItems: [],
+  })))
+  const intake = createDocumentIntake({ env: ENV, fetchImpl })
+  await readDocument(intake, {
+    mediaType: 'application/pdf', dataBase64: PDF_B64, expectedDocKey: 'tax_return_full',
+  })
+  const body = fetchImpl.calls[0].body
+  assert.equal(body.max_tokens, 24000)
+  assert.ok(body.output_config.format.schema.properties.taxForms)
+  assert.ok(body.output_config.format.schema.properties.taxLineItems)
+  const instruction = body.messages[0].content[1].text
+  assert.match(instruction, /COMPLETE TAX RETURNS/)
+  assert.match(instruction, /schedulec_net_profit/)
+  assert.match(instruction, /code prevents double counting/i)
 })
 
 test('a schema-constrained model is still not a trusted one', async () => {

@@ -12,6 +12,9 @@
 
 import { admin } from './supabase.mjs'
 import { getUser } from './userauth.mjs'
+import {
+  internalAal2Decision, internalAal2Enabled, isInternalUser,
+} from './internalSecurity.mjs'
 
 export const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -38,10 +41,20 @@ export function uaOf(req) {
   return h('user-agent').slice(0, 400) || null
 }
 
-// Verify the caller's JWT. Returns { user, token } or null. (Thin re-export so portal
-// functions don't each import userauth directly.)
+// Verify the caller's JWT and centrally enforce step-up authentication for internal users.
+// Borrowers/partners remain on their normal verified session. Direct API callers receive the
+// same fail-closed null as any other invalid authentication state; the SPA uses the deliberately
+// exempt portal-security-status endpoint to route staff to MFA before loading workspace data.
 export async function authUser(req) {
-  return getUser(req)
+  const auth = await getUser(req)
+  if (!auth || !internalAal2Enabled() || auth.aal === 'aal2') return auth
+  try {
+    const internal = await isInternalUser(admin(), auth.user.id)
+    return internalAal2Decision({ enabled: true, internal, aal: auth.aal }).allowed ? auth : null
+  } catch (error) {
+    console.error('[portal] internal AAL classification failed:', error?.message || error)
+    return null
+  }
 }
 
 // Load a loan_file by id (service role). Returns the row or null.

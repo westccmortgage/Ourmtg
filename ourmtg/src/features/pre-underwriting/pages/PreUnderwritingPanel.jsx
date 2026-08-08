@@ -45,7 +45,7 @@ export default function PreUnderwritingPanel() {
   if (error && !data) return <Alert kind="error">{error}</Alert>
   if (!data) return <p className="muted">Reading the file…</p>
 
-  const { readiness, missing, findings, programs, credit, unread, facts, liabilitySync } = data
+  const { readiness, regulatory, missing, findings, programs, credit, unread, facts, liabilitySync, taxIncome } = data
   const open = findings.filter((f) => f.status === 'pending_review')
   const decided = findings.filter((f) => f.status !== 'pending_review')
 
@@ -83,6 +83,42 @@ export default function PreUnderwritingPanel() {
         </div>
       </div>
 
+      {regulatory && (
+        <div className="card">
+          <div className="card-head">
+            <h2>Operational compliance</h2>
+            <span className={regulatory.status === 'ready_for_controlled_pilot' ? 'chip green' : 'chip red'}>
+              {regulatory.status === 'ready_for_controlled_pilot' ? 'Controlled pilot ready' : 'Blocked'}
+            </span>
+          </div>
+          <p className="muted" style={{ marginTop: 0 }}>{regulatory.meaning}</p>
+          <p className="hint">
+            Catalog {regulatory.catalogVersion} · source check {regulatory.verifiedAt}. This is
+            <b> not</b> {regulatory.notMeaning.join(', ')}.
+          </p>
+          {regulatory.forms?.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <b>Controlled application sources</b>
+              {regulatory.forms.map((form) => (
+                <div className="rsub" key={form.sourceId} style={{ marginTop: 5 }}>
+                  {form.title} · {form.applicability.replace('_', ' ')}
+                </div>
+              ))}
+            </div>
+          )}
+          {regulatory.blockers?.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <b>Must be resolved before a real-borrower pilot</b>
+              {regulatory.blockers.map((blocker) => (
+                <div className="rsub" key={blocker.code} style={{ color: 'var(--red)', marginTop: 5 }}>
+                  {blocker.message}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── The numbers ───────────────────────────────────────────────────── */}
       {facts && (
         <div className="card">
@@ -103,6 +139,8 @@ export default function PreUnderwritingPanel() {
             basis={facts.ltv.basis || (facts.ltv.missing.length ? `needs ${facts.ltv.missing.join(', ')}` : '')} />
         </div>
       )}
+
+      {taxIncome?.status !== 'not_available' && <TaxIncomeReport report={taxIncome} />}
 
       {/* ── Credit permission ─────────────────────────────────────────────── */}
       <div className="card">
@@ -355,6 +393,153 @@ function Fact({ label, value, basis, money, pct, warn }) {
     </div>
   )
 }
+
+function TaxIncomeReport({ report }) {
+  const prepared = report.status === 'prepared_for_review'
+  const calc = report.comparison || {}
+  return (
+    <div className="card">
+      <div className="card-head">
+        <h2>Tax-return income analysis</h2>
+        <span className={prepared ? 'chip green' : 'chip amber'}>
+          {prepared ? 'Prepared for review' : 'Incomplete'}
+        </span>
+      </div>
+      <p className="muted" style={{ marginTop: 0 }}>{report.meaning}</p>
+
+      <div className="metrics" style={{ marginTop: 12 }}>
+        <TaxMetric label="Calculated annual" value={calc.calculatedAnnual} />
+        <TaxMetric label="Calculated monthly" value={calc.calculatedMonthly} />
+        <div className="metric">
+          <span className="lbl">Two-year trend</span>
+          <span className="big-num" style={{ fontSize: 18 }}>{humanize(calc.trend)}</span>
+          <span className="lbl">{calc.changePercent == null ? '—' : `${calc.changePercent}%`}</span>
+        </div>
+      </div>
+      {calc.method && <p className="hint">Method: {calc.method}. This is calculated income, pending human confirmation.</p>}
+      <p className="hint">
+        It is <b>not</b> {report.notMeaning.join(', ')}. Final treatment depends on continuance,
+        business access/stability and the selected investor’s rules.
+      </p>
+
+      {report.missing.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <h3 style={{ fontSize: 14, marginBottom: 6 }}>Missing or conflicting</h3>
+          {report.missing.map((m, i) => (
+            <div className="row" key={`${m.code}-${m.year || ''}-${i}`} style={{ display: 'block' }}>
+              <div className="rlabel">{m.message}</div>
+              {m.evidence?.length > 0 && <EvidenceList evidence={m.evidence} />}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <h3 style={{ fontSize: 14, margin: '18px 0 6px' }}>Year-by-year worksheet</h3>
+      {report.years.map((year) => (
+        <details key={year.taxYear} style={{ marginBottom: 10 }} open={report.years.length <= 2}>
+          <summary className="spread" style={{ cursor: 'pointer' }}>
+            <strong>{year.taxYear}</strong>
+            <span>
+              {year.calculatedAnnual == null ? 'Not fully computable' : `${money(year.calculatedAnnual)}/yr · ${money(year.calculatedMonthly)}/mo`}
+            </span>
+          </summary>
+          <p className="muted" style={{ fontSize: 12.5 }}>
+            Forms: {year.forms.map((f) => `${humanizeForm(f.formType)} pp. ${f.pageStart}${f.pageEnd !== f.pageStart ? `–${f.pageEnd}` : ''}`).join('; ')}
+          </p>
+          {year.sources.filter((s) => s.includedLineCount > 0 || s.crossChecks.length > 0).map((source) => (
+            <div className="row" key={source.id} style={{ display: 'block' }}>
+              <div className="spread">
+                <div>
+                  <div className="rlabel">{source.label}</div>
+                  <p className="mb0 muted" style={{ fontSize: 12.5 }}>
+                    {source.formTypes.map(humanizeForm).join(', ')}
+                    {source.ownershipPercent !== 100 && source.ownershipPercent != null ? ` · ${source.ownershipPercent}% ownership` : ''}
+                  </p>
+                </div>
+                <strong>{source.annual == null ? '—' : money(source.annual)}</strong>
+              </div>
+              {source.base.length > 0 && (
+                <p className="mb0 muted" style={{ fontSize: 12.5 }}>
+                  Base {money(source.baseTotal)}
+                  {source.adjustments.length > 0 ? ` + add-backs ${money(source.adjustmentsTotal)}` : ''}
+                  {source.ownershipPercent !== 100 && source.ownershipPercent != null ? ` × ${source.ownershipPercent}%` : ''}
+                </p>
+              )}
+              {source.adjustments.map((a) => (
+                <p className="mb0 hint" key={`${a.lineKey}-${a.amount}`}>Add-back: {a.label} {money(a.amount)}</p>
+              ))}
+              {source.crossChecks.length > 0 && (
+                <details style={{ marginTop: 6 }}>
+                  <summary className="muted">Cross-check / excluded lines ({source.crossChecks.length})</summary>
+                  {source.crossChecks.map((x, i) => (
+                    <p className="mb0 muted" style={{ fontSize: 12.5 }} key={`${x.lineKey}-${i}`}>
+                      {x.label}: {money(x.amount)} · {humanize(x.reason)}
+                    </p>
+                  ))}
+                </details>
+              )}
+              <EvidenceList evidence={source.evidence} />
+            </div>
+          ))}
+        </details>
+      ))}
+
+      {report.reconciliation.length > 0 && (
+        <details style={{ marginTop: 14 }}>
+          <summary className="muted">Return reconciliation ({report.reconciliation.length})</summary>
+          {report.reconciliation.map((r) => (
+            <div className="row" key={`${r.taxYear}-${r.label}`} style={{ display: 'block' }}>
+              <div className="spread">
+                <div className="rlabel">{r.taxYear} · {r.label}</div>
+                <span className={r.status === 'matched' ? 'chip green' : 'chip amber'}>{r.status}</span>
+              </div>
+              <p className="mb0 muted" style={{ fontSize: 12.5 }}>
+                Return {money(r.reportedAmount)} · supporting forms {money(r.supportingAmount)} · difference {money(r.difference)}
+              </p>
+            </div>
+          ))}
+        </details>
+      )}
+
+      {report.reviewFlags.length > 0 && (
+        <details style={{ marginTop: 14 }}>
+          <summary className="muted">Required reviewer checks ({report.reviewFlags.length})</summary>
+          {report.reviewFlags.map((f, i) => (
+            <p key={`${f.code}-${f.year || ''}-${i}`} className="hint">{f.message}</p>
+          ))}
+        </details>
+      )}
+    </div>
+  )
+}
+
+function TaxMetric({ label, value }) {
+  return (
+    <div className="metric">
+      <span className="lbl">{label}</span>
+      <span className="big-num" style={{ fontSize: 18 }}>{value == null ? '—' : money(value)}</span>
+      <span className="lbl">pending review</span>
+    </div>
+  )
+}
+
+function EvidenceList({ evidence = [] }) {
+  if (!evidence.length) return null
+  return (
+    <details style={{ marginTop: 6 }}>
+      <summary className="muted">Source lines ({evidence.length})</summary>
+      {evidence.map((e, i) => (
+        <p className="mb0 muted" style={{ fontSize: 12 }} key={`${e.documentId || ''}-${e.lineKey}-${e.page}-${i}`}>
+          {e.taxYear} {humanizeForm(e.formType)} · page {e.page} · {e.lineLabel}: {money(e.amount)} · {Math.round(e.confidence * 100)}% confidence
+        </p>
+      ))}
+    </details>
+  )
+}
+
+const humanize = (v) => String(v || 'not computable').replaceAll('_', ' ')
+const humanizeForm = (v) => String(v || '').replace('schedule_', 'Schedule ').replace('k1_', 'K-1 ').replaceAll('_', ' ').toUpperCase()
+const money = (n) => typeof n === 'number' ? `$${Math.round(n).toLocaleString('en-US')}` : '—'
 
 const fmt = (n) => (typeof n === 'number' ? `$${Math.round(n).toLocaleString('en-US')}` : String(n))
 

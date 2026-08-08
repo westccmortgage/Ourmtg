@@ -29,6 +29,9 @@ import { REVIEW_CONFIDENCE_THRESHOLD, evidence } from './findings.js'
 // Deliberately reused rather than re-implemented. Two copies of a redaction rule is one copy
 // that gets patched and one that does not.
 import { looksLikeInjection, redactSensitive, apiJsonSchema } from '../conversational-1003/turnContract.js'
+import {
+  TAX_FORM_SCHEMA, TAX_LINE_SCHEMA, validateTaxReturnData,
+} from './taxReturnContract.js'
 
 export const MAX_FIELDS = 40
 export const MAX_TEXT = 600
@@ -197,6 +200,14 @@ export function validateExtractionResponse(raw, opts = {}) {
     }
   }
 
+  // ── tax-return package ───────────────────────────────────────────────────
+  // A full return carries repeated forms and line items, so it cannot be squeezed into the
+  // scalar field list without either dropping most of the package or allowing arbitrary nested
+  // objects. The tax-only validator is another closed contract and rejects these arrays on every
+  // other document type.
+  const tax = validateTaxReturnData(raw, docKey)
+  rejected.push(...tax.rejected)
+
   // ── prose ────────────────────────────────────────────────────────────────
   // Anything free-form went through the model from a document a stranger may have written.
   let notes = text(raw.notes, MAX_TEXT)
@@ -205,7 +216,10 @@ export function validateExtractionResponse(raw, opts = {}) {
 
   // ── review triggers ──────────────────────────────────────────────────────
   const legible = raw.legible === false ? false : true
-  const confidences = [...fields.map((f) => f.confidence), ...tradelines.map((t) => t.confidence)]
+  const confidences = [
+    ...fields.map((f) => f.confidence), ...tradelines.map((t) => t.confidence),
+    ...tax.confidences,
+  ]
   const weakest = confidences.length ? Math.min(...confidences) : null
   const lowConfidenceClassification = docKeyConfidence === null || docKeyConfidence < CLASSIFY_CONFIDENCE_THRESHOLD
   // Uploaded under "Bank statements", reads as a pay stub. Either the borrower picked the wrong
@@ -235,6 +249,8 @@ export function validateExtractionResponse(raw, opts = {}) {
       legible,
       fields,
       tradelines,
+      taxForms: tax.forms,
+      taxLineItems: tax.lineItems,
       minFieldConfidence: weakest,
       notes,
       needsHumanReview: reviewReasons.length > 0,
@@ -253,6 +269,8 @@ function emptyValue(expectedDocKey) {
     legible: true,
     fields: [],
     tradelines: [],
+    taxForms: [],
+    taxLineItems: [],
     minFieldConfidence: null,
     notes: null,
     needsHumanReview: true,
@@ -401,10 +419,29 @@ function coerce(kind, raw) {
 
 function isoDate(s) {
   const trimmed = s.trim()
-  // Anchor bare YYYY-MM-DD to UTC. Date.parse treats it as UTC but "6/30/2026" as local, and a
-  // statement that slid a day backwards across a month boundary would read as a missing month.
+  // Parse the common date-only shapes into UTC ourselves. Date.parse treats "6/30/2026" and
+  // "June 30, 2026" as local time; west/east of UTC they can slide into an adjacent day and make
+  // a complete statement period appear incomplete.
   const bare = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed)
-  const t = Date.parse(bare ? `${trimmed}T00:00:00Z` : trimmed)
+  const us = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(trimmed)
+  const named = /^([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})$/.exec(trimmed)
+  const months = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december']
+  let parts = null
+  if (bare) parts = [Number(bare[1]), Number(bare[2]), Number(bare[3])]
+  else if (us) parts = [Number(us[3]), Number(us[1]), Number(us[2])]
+  else if (named) {
+    const month = months.indexOf(named[1].toLowerCase()) + 1
+    if (month > 0) parts = [Number(named[3]), month, Number(named[2])]
+  }
+  if (parts) {
+    const [year, month, day] = parts
+    const d = new Date(Date.UTC(year, month - 1, day))
+    if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) return null
+    if (year < 1900 || year > 2100) return null
+    return d.toISOString().slice(0, 10)
+  }
+
+  const t = Date.parse(trimmed)
   if (!Number.isFinite(t)) return null
   const d = new Date(t)
   const year = d.getUTCFullYear()
@@ -430,6 +467,17 @@ export function toPart(validated) {
   if (!v || !v.docKey) return null
   const part = {}
   for (const f of v.fields) part[f.name] = f.value
+  if (v.docKey === 'tax_return_full') {
+    // Completeness needs the form inventory only to name missing years/forms. Confidence and
+    // amounts stay in their own paths; no tax conclusion reaches the borrower checklist.
+    part.taxForms = (v.taxForms || []).map((f) => ({
+      formType: f.formType,
+      taxYear: f.taxYear,
+      entityName: f.entityName || null,
+      ownershipPercent: f.ownershipPercent ?? null,
+    }))
+    part.taxYears = [...new Set(part.taxForms.map((f) => f.taxYear))]
+  }
   return part
 }
 
@@ -450,7 +498,13 @@ const unwrap = (v) => (v && typeof v === 'object' && 'ok' in v && 'value' in v ?
 export function toEvidence(validated, opts = {}) {
   const v = unwrap(validated)
   if (!v || !v.docKey) return []
-  return v.fields.map((f) => evidence(v.docKey, f.name, f.value, f.confidence, opts.documentId))
+  return [
+    ...v.fields.map((f) => evidence(v.docKey, f.name, f.value, f.confidence, opts.documentId)),
+    ...(v.taxLineItems || []).map((l) => evidence(
+      v.docKey, `${l.taxYear}.${l.formType}.${l.lineKey}.page_${l.page}`,
+      l.amount, l.confidence, opts.documentId,
+    )),
+  ]
 }
 
 /**
@@ -535,6 +589,8 @@ export const EXTRACTION_RESPONSE_SCHEMA = Object.freeze({
         },
       },
     },
+    taxForms: TAX_FORM_SCHEMA,
+    taxLineItems: TAX_LINE_SCHEMA,
     notes: { type: ['string', 'null'], maxLength: MAX_TEXT },
   },
 })

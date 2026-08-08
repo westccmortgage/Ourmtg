@@ -38,6 +38,9 @@ import {
 import { buildAnalysisContext } from '../../src/features/pre-underwriting/analysisContext.js'
 import { applicationFactsFromState } from '../../src/features/pre-underwriting/applicationFacts.js'
 import { runRules } from '../../src/features/pre-underwriting/rules.js'
+import {
+  createScanProvider, preUnderwritingScanRequired, scanDecision,
+} from './_lib/scan-provider.mjs'
 
 // Reading a document is a model call against a whole PDF — far more expensive than a turn, and
 // nobody legitimately reads sixty documents a minute.
@@ -98,6 +101,24 @@ export default async (req) => {
       return json({ ok: false, error: MESSAGES[file.code] || 'This file could not be read.', code: file.code }, 422)
     }
 
+    // A model must never be the first security control to parse an upload. Byte-signature
+    // verification happened in downloadDocument; an affirmative malware result is required by
+    // default before the document may cross the extraction-provider boundary.
+    let scanner
+    try { scanner = createScanProvider() }
+    catch {
+      return json({ ok: false, error: 'Document security scanning is not configured.', code: 'scan_not_configured' }, 503)
+    }
+    const scan = await scanner.scan({ bucket: 'ourmtg-docs', path: document.storage_path, correlationId })
+    const scanGate = scanDecision(scan, { required: preUnderwritingScanRequired() })
+    if (!scanGate.ok) {
+      logEvent('pu.intake.scan_blocked', {
+        severity: scan.status === 'infected' ? 'warn' : 'error', requestId: correlationId,
+        code: scanGate.code, provider: scanner.name,
+      })
+      return json({ ok: false, error: scanGate.error, code: scanGate.code }, scanGate.status)
+    }
+
     let intake
     try {
       intake = createDocumentIntake()
@@ -147,8 +168,10 @@ export default async (req) => {
         proposedDocKey: read.value.proposedDocKey,
         docKeyConfidence: read.value.docKeyConfidence,
         docKeyMismatch: read.value.docKeyMismatch,
-        fieldCount: read.value.fields.length,
+        fieldCount: read.value.fields.length + (read.value.taxLineItems || []).length,
         tradelineCount: (read.value.tradelines || []).length,
+        taxFormCount: (read.value.taxForms || []).length,
+        taxLineItemCount: (read.value.taxLineItems || []).length,
         minFieldConfidence: read.value.minFieldConfidence,
         needsHumanReview: read.value.needsHumanReview,
         reviewReasons: read.value.reviewReasons,
@@ -209,6 +232,8 @@ const MESSAGES = {
   download_failed: 'The stored file could not be opened.',
   empty_file: 'That file is empty.',
   file_too_large: 'That file is too large to read. A scan under 20 MB works best.',
+  unsupported_file_content: 'The uploaded file is not a supported PDF, JPG, PNG, or HEIC document.',
+  content_type_mismatch: 'The uploaded file contents do not match its reported file type.',
   unsupported_media_type: 'That file type cannot be read. PDF, JPEG, PNG, or WEBP — an iPhone photo may need converting from HEIC.',
   refusal: 'The reader declined this document. A person should open it.',
   max_tokens: 'That document is too long to read in one pass.',

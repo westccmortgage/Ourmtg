@@ -48,6 +48,9 @@ test('task-linked signed upload is bound to task and exact document before stora
 test('task-linked finalize is request-guarded and invokes no delivery provider', async () => {
   const src = await read('netlify/functions/portal-doc-complete.mjs')
   assert.match(src, /readJsonBody\(req\)/)
+  const inspectAt = src.indexOf('inspectDocumentBytes(bytes')
+  const finalizeAt = src.indexOf('repo.finalizeDocumentSubmit')
+  assert.ok(inspectAt >= 0 && finalizeAt > inspectAt, 'actual bytes are verified before the task transition')
   const taskStart = src.indexOf("if (route.mode === 'task')")
   const legacyStart = src.indexOf("if (route.mode === 'legacy')")
   assert.ok(taskStart >= 0 && legacyStart > taskStart)

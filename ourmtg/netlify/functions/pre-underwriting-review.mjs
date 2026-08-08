@@ -48,6 +48,9 @@ import {
   ensureApplication, ensurePartyByIndex, listParties, loadState, persistEvents, syncProjection,
 } from './_lib/applicationRepo.mjs'
 import { recordValue } from '../../src/features/conversational-1003/applicationReducer.js'
+import { ATTESTATION } from '../../src/features/conversational-1003/attestationText.js'
+import { regulatoryReadiness } from '../../src/features/compliance/regulatoryReadiness.js'
+import { serverFlag } from './_lib/featureFlags.mjs'
 
 const ACTIONS = ['confirm', 'correct', 'dismiss', 'reanalyse', 'import_liabilities']
 
@@ -212,6 +215,33 @@ async function panel(svc, { loanFile, req, auth }) {
   const credit = creditPullAllowed(authorizations)
   const creditGap = authorizationGap({ authorizations })
 
+  // This is deliberately NOT folded into the loan-readiness percentage. A complete financial
+  // file and a deployment that is allowed to handle it are different questions. Known open
+  // controls stay visible and keep the system from claiming "government complete".
+  const regulatory = regulatoryReadiness({
+    loanType: loanFile.loan_type,
+    applicationDate: loanFile.created_at,
+    // Delivery channel is not yet a controlled loan-file field. Unknown is a blocker where it
+    // changes applicability (SCIF), never a guess.
+    gseDelivery: null,
+    controls: {
+      // Enforcement and recorded acceptance are deliberately separate. Turning a switch on is
+      // not evidence that recovery/offboarding and live AAL behavior were tested.
+      internalMfaEnforced: serverFlag('OURMTG_INTERNAL_AAL2_ENFORCED')
+        && serverFlag('OURMTG_INTERNAL_AAL2_ACCEPTED'),
+      documentScannerConfigured: String(process.env.OURMTG_DOCUMENT_SCAN_PROVIDER || '').toLowerCase() === 'http'
+        && Boolean(process.env.OURMTG_DOCUMENT_SCAN_URL && process.env.OURMTG_DOCUMENT_SCAN_TOKEN),
+      retentionPolicyApproved: serverFlag('OURMTG_RETENTION_POLICY_APPROVED'),
+      controlledTextsReviewed: ATTESTATION.reviewed === true && CREDIT_AUTHORIZATION.reviewed === true,
+      // docs/CONVERSATIONAL-1003-FIELD-COVERAGE.md still lists unmapped fields.
+      fieldCoverageApproved: false,
+      programCatalogApproved: serverFlag('OURMTG_REGULATORY_CATALOG_APPROVED'),
+      tridTriggerImplemented: false,
+      regBNotificationsImplemented: false,
+      privacyProgramApproved: false,
+    },
+  })
+
   // Credit ↔ application reconciliation. The panel shows what would be imported BEFORE the
   // button is pressed — writing into an application is not a side effect a person discovers.
   const declared = application.liabilities || []
@@ -251,6 +281,7 @@ async function panel(svc, { loanFile, req, auth }) {
   return {
     ok: true,
     readiness,
+    regulatory,
     // Split by who can act. A processor chasing a borrower for a credit report is a wasted day,
     // and a borrower asked for one is a borrower who cannot comply.
     missing: {
@@ -267,6 +298,10 @@ async function panel(svc, { loanFile, req, auth }) {
     // Shown on the panel with its own provenance. A processor who cannot see where a DTI came
     // from has to recompute it by hand, which is the work this was supposed to remove.
     facts,
+    // The full source-linked tax worksheet is kept separate from facts.income. Extraction can
+    // prepare this calculation, but it cannot turn it into final qualifying income without the
+    // licensed review described on the report itself.
+    taxIncome: ctx.taxIncome,
     programs: programFit({
       creditScore: facts.creditScore.score,
       ltv: facts.ltv.percent,
@@ -290,7 +325,10 @@ async function panel(svc, { loanFile, req, auth }) {
     extractions: extractions.map((e) => ({
       id: e.id, documentId: e.documentId, docKey: e.docKey, proposedDocKey: e.proposedDocKey,
       docKeyConfidence: e.docKeyConfidence, docKeyMismatch: e.docKeyMismatch, legible: e.legible,
-      fieldCount: e.fields.length, tradelineCount: e.tradelines.length,
+      fieldCount: e.fields.length + (e.taxLineItems || []).length,
+      tradelineCount: e.tradelines.length,
+      taxFormCount: (e.taxForms || []).length,
+      taxLineItemCount: (e.taxLineItems || []).length,
       minFieldConfidence: e.minFieldConfidence, needsHumanReview: e.needsHumanReview,
       reviewReasons: e.reviewReasons, createdAt: e.createdAt,
       // Values, so a reviewer can check a reading without downloading the document. Identity and

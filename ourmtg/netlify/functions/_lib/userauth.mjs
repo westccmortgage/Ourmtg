@@ -16,6 +16,25 @@ function bearer(req) {
   return m ? m[1] : null
 }
 
+// Read claims only after GoTrue has verified the exact token in getUser(). This is not a
+// signature verifier; it is a small, fail-closed decoder for a claim on an already-verified JWT.
+export function claimsFromVerifiedJwt(token) {
+  try {
+    const parts = String(token || '').split('.')
+    if (parts.length !== 3 || !parts[1]) return {}
+    const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+    const padded = payload.padEnd(Math.ceil(payload.length / 4) * 4, '=')
+    const claims = JSON.parse(Buffer.from(padded, 'base64').toString('utf8'))
+    return claims && typeof claims === 'object' && !Array.isArray(claims) ? claims : {}
+  } catch {
+    return {}
+  }
+}
+
+export function authenticatorAssuranceLevel(token) {
+  return claimsFromVerifiedJwt(token).aal === 'aal2' ? 'aal2' : 'aal1'
+}
+
 // Client that acts AS the user — RLS enforced via the forwarded JWT.
 export function userClient(token) {
   return createClient(URL, ANON, {
@@ -24,7 +43,7 @@ export function userClient(token) {
   })
 }
 
-// Returns { user, token } or null.
+// Returns { user, token, aal } or null. Unknown/malformed assurance is always aal1.
 export async function getUser(req) {
   if (!isConfigured()) return null
   const token = bearer(req)
@@ -32,5 +51,5 @@ export async function getUser(req) {
   const client = createClient(URL, ANON, { auth: { persistSession: false, autoRefreshToken: false } })
   const { data, error } = await client.auth.getUser(token)
   if (error || !data?.user) return null
-  return { user: data.user, token }
+  return { user: data.user, token, aal: authenticatorAssuranceLevel(token) }
 }

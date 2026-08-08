@@ -36,9 +36,11 @@ const DEFAULT_MODEL = 'claude-opus-5'
 // its lines. Worth more thought than the interview turn gets.
 const DEFAULT_EFFORT = 'medium'
 const DEFAULT_MAX_TOKENS = 8192
+const TAX_RETURN_MAX_TOKENS = 24_000
 // Scans go through OCR before the model has read a word. The 20s the interview uses would time
 // out on an ordinary twelve-page bank statement.
 const DEFAULT_TIMEOUT_MS = 90_000
+const TAX_RETURN_TIMEOUT_MS = 180_000
 
 // The API accepts PDFs as documents and these four as images. Everything else — HEIC above all,
 // which is what an iPhone produces by default — has to be converted before it gets here, and
@@ -104,7 +106,9 @@ export function createDocumentIntake({ env = process.env, fetchImpl = globalThis
   async function extractOnce({ mediaType, dataBase64, expectedDocKey, pageCount, correlationId }) {
     const body = {
       model,
-      max_tokens: DEFAULT_MAX_TOKENS,
+      // A complete two-year personal/business package can legitimately produce hundreds of
+      // source-linked rows. Truncating that output would create a polished partial worksheet.
+      max_tokens: expectedDocKey === 'tax_return_full' ? TAX_RETURN_MAX_TOKENS : DEFAULT_MAX_TOKENS,
       system: EXTRACTION_SYSTEM_PROMPT,
       messages: [{
         role: 'user',
@@ -192,7 +196,7 @@ export function createDocumentIntake({ env = process.env, fetchImpl = globalThis
  */
 export async function readDocument(intake, {
   mediaType, dataBase64, expectedDocKey = null, pageCount = null,
-  correlationId, timeoutMs = DEFAULT_TIMEOUT_MS, retries = 1,
+  correlationId, timeoutMs = null, retries = 1,
 }) {
   const started = Date.now()
   const refusal = rejectUpload({ mediaType, dataBase64 })
@@ -208,7 +212,10 @@ export async function readDocument(intake, {
 
   const call = await callWithGuard(
     () => intake.extractOnce({ mediaType, dataBase64, expectedDocKey, pageCount, correlationId }),
-    { timeoutMs, retries },
+    {
+      timeoutMs: timeoutMs ?? (expectedDocKey === 'tax_return_full' ? TAX_RETURN_TIMEOUT_MS : DEFAULT_TIMEOUT_MS),
+      retries,
+    },
   )
 
   const meta = {
@@ -237,6 +244,8 @@ export async function readDocument(intake, {
     docKey: validated.value.docKey,
     docKeyConfidence: validated.value.docKeyConfidence,
     fields: validated.value.fields.length,
+    taxForms: validated.value.taxForms.length,
+    taxLineItems: validated.value.taxLineItems.length,
     rejectedFields: validated.rejected.length,
     minFieldConfidence: validated.value.minFieldConfidence,
     needsHumanReview: validated.value.needsHumanReview,

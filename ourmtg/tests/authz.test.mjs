@@ -81,6 +81,7 @@ test('isValidDocKey: real slots vs arbitrary; type/purpose shaping', () => {
   const conv = { loanType: 'Conventional', purpose: 'Purchase' }
   assert.equal(isValidDocKey(conv, 'paystubs_30d'), true)
   assert.equal(isValidDocKey(conv, 'purchase_contract'), true)
+  assert.equal(isValidDocKey(conv, 'tax_return_full'), true)
   assert.equal(isValidDocKey(conv, 'ssn_card'), false)
   assert.equal(isValidDocKey({ loanType: 'VA', purpose: 'Purchase' }, 'coe'), true)
   assert.equal(isValidDocKey({ loanType: 'Non-QM', purpose: 'Purchase' }, 'paystubs_30d'), false)

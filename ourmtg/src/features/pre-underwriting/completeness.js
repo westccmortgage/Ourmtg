@@ -12,6 +12,7 @@
 // request, not a conclusion about the person.
 
 import { getDocumentType } from './documentCatalog.js'
+import { TAX_BUSINESS_RETURN_FOR_K1 } from './taxReturnContract.js'
 
 const DAY = 86_400_000
 
@@ -162,9 +163,36 @@ export function assessCompleteness(docKey, parts, opts = {}) {
 
   // ── Tax years ────────────────────────────────────────────────────────────
   if (Number.isFinite(rules.taxYears)) {
-    const years = [...new Set(items.map((i) => Number(i.taxYear)).filter(Number.isInteger))].sort((a, b) => b - a)
+    const years = [...new Set(items.flatMap((i) => [i.taxYear, ...(Array.isArray(i.taxYears) ? i.taxYears : [])])
+      .map(Number).filter(Number.isInteger))].sort((a, b) => b - a)
     if (years.length < rules.taxYears) {
       gaps.push({ code: 'missing_tax_years', message: `We have ${years.length} of ${rules.taxYears} years — please send the other one.` })
+    }
+  }
+
+  if (rules.taxPackage) {
+    const forms = items.flatMap((i) => Array.isArray(i.taxForms) ? i.taxForms : [])
+    const years = [...new Set(forms.map((f) => Number(f.taxYear)).filter(Number.isInteger))].sort((a, b) => b - a)
+    if (forms.length === 0) {
+      gaps.push({ code: 'unreadable_tax_package', message: 'We couldn’t identify the forms in this package — please send a complete, readable copy of the return.' })
+    }
+    for (const year of years) {
+      if (!forms.some((f) => f.formType === '1040' && Number(f.taxYear) === year)) {
+        gaps.push({ code: 'missing_form_1040', message: `The ${year} package is missing Form 1040 — please send the complete return.` })
+      }
+    }
+    for (const k1 of forms.filter((f) => TAX_BUSINESS_RETURN_FOR_K1[f.formType])) {
+      if (k1.ownershipPercent != null && Number(k1.ownershipPercent) < 25) continue
+      const required = TAX_BUSINESS_RETURN_FOR_K1[k1.formType]
+      const match = forms.some((f) => f.formType === required && Number(f.taxYear) === Number(k1.taxYear) && (
+        !k1.entityName || !f.entityName || entitiesMatch(f.entityName, k1.entityName)
+      ))
+      if (!match) {
+        gaps.push({
+          code: 'missing_business_return',
+          message: `The ${k1.taxYear} package needs the complete ${required.toUpperCase()} return${k1.entityName ? ` for ${k1.entityName}` : ''}.`,
+        })
+      }
     }
   }
 
@@ -264,6 +292,12 @@ const asList = (v) => {
   if (Array.isArray(v)) return v.filter(Boolean)
   if (typeof v === 'string') return v.split(/[,/;&]|\band\b/i).map((s) => s.trim()).filter(Boolean)
   return []
+}
+
+const normalizeEntity = (v) => String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+const entitiesMatch = (a, b) => {
+  const x = normalizeEntity(a); const y = normalizeEntity(b)
+  return Boolean(x && y && (x === y || x.includes(y) || y.includes(x)))
 }
 
 function mergeSpans(sorted) {

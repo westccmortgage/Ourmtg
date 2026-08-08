@@ -24,7 +24,15 @@ export default function TeamDocUpload({ loanFileId, onUploaded }) {
   useEffect(() => {
     let alive = true
     getChecklist(loanFileId)
-      .then((r) => { if (alive) setItems(r?.items || []) })
+      .then((r) => {
+        if (!alive) return
+        const rows = r?.items || []
+        setItems(rows.some((i) => i.docKey === 'tax_return_full') ? rows : [...rows, {
+          docKey: 'tax_return_full',
+          label: 'Complete federal tax returns — personal and business',
+          status: null,
+        }])
+      })
       .catch(() => { if (alive) setItems([]) })
     return () => { alive = false }
   }, [loanFileId])

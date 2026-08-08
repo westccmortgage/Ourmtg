@@ -11,6 +11,8 @@ import { createTaskRepo } from './_lib/taskRepo.mjs'
 import { taskPilotEnabled } from './_lib/featureFlags.mjs'
 import { readJsonBody, isUuid, docTaskLinkDecision } from './_lib/requestGuard.mjs'
 import { isValidIdempotencyKey, requestHash } from './_lib/idempotency.mjs'
+import { inspectDocumentBytes } from './_lib/upload-policy.mjs'
+import { createScanProvider, documentScanRequired, scanDecision } from './_lib/scan-provider.mjs'
 
 const BUCKET = 'ourmtg-docs'
 const OURMTG_URL = (process.env.OURMTG_URL || 'https://ourmtg.com').replace(/\/$/, '')
@@ -58,16 +60,30 @@ export default async (req) => {
   if (!access || !canSeeFinancials(access.visibility)) return json({ ok: false, error: 'No access to this document' }, 403)
   if (!doc.storage_path) return json({ ok: false, error: 'No upload was prepared for this document' }, 409)
 
-  const slash = doc.storage_path.lastIndexOf('/')
-  const dir = slash >= 0 ? doc.storage_path.slice(0, slash) : ''
-  const base = slash >= 0 ? doc.storage_path.slice(slash + 1) : doc.storage_path
-  const { data: listed, error: lErr } = await svc.storage.from(BUCKET).list(dir, { search: base, limit: 100 })
-  if (lErr) {
+  // Existence is not enough: read the private object and verify its signature before any
+  // document/task state transition. This stops a renamed executable/HTML payload from becoming
+  // a submitted mortgage document merely because its upload finished.
+  const { data: uploaded, error: lErr } = await svc.storage.from(BUCKET).download(doc.storage_path)
+  if (lErr || !uploaded) {
     console.error('[portal-doc-complete] storage verification failed')
     return json({ ok: false, error: 'Could not verify the upload — please try again' }, 502)
   }
-  if (!Array.isArray(listed) || !listed.some((o) => o.name === base)) {
-    return json({ ok: false, error: 'Upload not found — please try uploading again' }, 409)
+  const bytes = Buffer.from(await uploaded.arrayBuffer())
+  if (bytes.byteLength > 25 * 1024 * 1024) {
+    return json({ ok: false, error: 'That file is over 25 MB — please upload a smaller file', code: 'file_too_large' }, 413)
+  }
+  const inspected = inspectDocumentBytes(bytes, { declaredContentType: uploaded.type || null })
+  if (!inspected.ok) return json({ ok: false, error: inspected.error, code: inspected.code }, 422)
+
+  let scanner
+  try { scanner = createScanProvider() }
+  catch {
+    return json({ ok: false, error: 'Document security scanning is not configured.', code: 'scan_not_configured' }, 503)
+  }
+  const scan = await scanner.scan({ bucket: BUCKET, path: doc.storage_path })
+  const scanGate = scanDecision(scan, { required: documentScanRequired() })
+  if (!scanGate.ok) {
+    return json({ ok: false, error: scanGate.error, code: scanGate.code }, scanGate.status)
   }
 
   let taskTransition = null
