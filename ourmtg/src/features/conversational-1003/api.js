@@ -74,6 +74,24 @@ export const confirmValues = ({ loanFileId, action, paths, fieldPath, chosenValu
     },
   })
 
+export const validatePropertyAddress = ({ loanFileId, locale = 'en', assistParty, takenVia }) =>
+  call('application-address-validate', {
+    method: 'POST',
+    body: {
+      loanFileId, action: 'validate', locale,
+      ...(assistParty === 0 || assistParty === 1 ? { assistParty, takenVia } : {}),
+    },
+  })
+
+export const acceptPropertyAddress = ({ loanFileId, locale = 'en', idempotencyKey, assistParty, takenVia }) =>
+  call('application-address-validate', {
+    method: 'POST',
+    body: {
+      loanFileId, action: 'accept_suggestion', locale, idempotencyKey,
+      ...(assistParty === 0 || assistParty === 1 ? { assistParty, takenVia } : {}),
+    },
+  })
+
 export const saveSecureField = ({ loanFileId, fieldPath, value, locale = 'en', idempotencyKey }) =>
   call('application-secure-field', {
     method: 'POST',

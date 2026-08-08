@@ -24,6 +24,7 @@ alone means the API works but no UI is routed. Anything other than `"1"`/`"true"
 | `CONVERSATIONAL_1003_EFFORT` | no | Defaults to `low` — correct for structured extraction |
 | `CONVERSATIONAL_1003_ALLOW_MOCK` | no | Must be `true` for the mock to be selectable. **Never set in production.** |
 | `OURMTG_SECURE_FIELD_KEY` | yes | HMAC key for the secure-field digest. Falls back to `OURMTG_FINGERPRINT_SALT`; set it explicitly. Treat like the service role key. |
+| `GOOGLE_ADDRESS_VALIDATION_API_KEY` | yes (property-address verification) | Server-only Google Address Validation key. Restrict it to the Address Validation API; never expose it as `VITE_*`. |
 | `ANTHROPIC_BASE_URL` | no | Override for testing |
 
 ### Running without a provider key (basic mode)

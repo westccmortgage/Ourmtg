@@ -57,6 +57,7 @@ async function loadHandlers(env = {}) {
     session: (await import(`../netlify/functions/application-session.mjs${q}`)).default,
     turn: (await import(`../netlify/functions/application-turn.mjs${q}`)).default,
     confirm: (await import(`../netlify/functions/application-confirm.mjs${q}`)).default,
+    address: (await import(`../netlify/functions/application-address-validate.mjs${q}`)).default,
     secure: (await import(`../netlify/functions/application-secure-field.mjs${q}`)).default,
     attest: (await import(`../netlify/functions/application-attest.mjs${q}`)).default,
     team: (await import(`../netlify/functions/application-team-review.mjs${q}`)).default,
@@ -116,6 +117,29 @@ test('realtor is structurally excluded from the application (403)', async () => 
     // No application or party row was created for them.
     assert.equal(fake.rowsOf('mortgage_applications').length, 0)
     assert.equal(fake.rowsOf('application_parties').length, 0)
+
+    const address = await h.address(makeRequest('https://app.test/x', {
+      method: 'POST', token: 'tok-realtor',
+      body: { loanFileId: LOAN, action: 'validate' },
+    }))
+    assert.equal(address.status, 403)
+  } finally { restore() }
+})
+
+test('property-address verification reads server state and waits for all four components', async () => {
+  const fake = createFakeSupabase({ tables: BASE_TABLES(), users: USERS })
+  const restore = install(fake)
+  try {
+    const h = await loadHandlers()
+    await h.session(makeRequest(sessionUrl(), { token: 'tok-borrower' }))
+    const res = await h.address(makeRequest('https://app.test/x', {
+      method: 'POST', token: 'tok-borrower',
+      // No address is echoed from the browser. The endpoint reads reducer state only.
+      body: { loanFileId: LOAN, action: 'validate' },
+    }))
+    assert.equal(res.status, 200)
+    assert.deepEqual((await res.json()).addressValidation, { status: 'incomplete' })
+    assert.equal(fake.rowsOf('application_field_events').length, 0)
   } finally { restore() }
 })
 
