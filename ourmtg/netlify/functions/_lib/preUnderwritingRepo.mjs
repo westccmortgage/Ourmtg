@@ -261,10 +261,11 @@ export async function listAuthorizations(svc, loanFileId) {
 export async function listDocuments(svc, loanFileId) {
   const { data, error } = await svc
     .from('loan_documents')
-    .select('id, doc_key, label, status, storage_path, who, uploaded_at')
+    .select('id, doc_key, label, status, storage_path, who, uploaded_at, reject_reason')
     .eq('loan_file_id', loanFileId)
   if (error) throw new Error('documents read: ' + error.message)
-  return (data || []).filter((d) => getDocumentType(d.doc_key) || d.doc_key)
+  return (data || []).filter((d) => !String(d.reject_reason || '').startsWith('__REMOVED__:'))
+    .filter((d) => getDocumentType(d.doc_key) || d.doc_key)
 }
 
 // The deterministic identity rules already stamp on each finding (findingIds above); the rule
