@@ -69,8 +69,34 @@ test('document scanning is fail-closed for pre-underwriting and mocks require ex
   const scanner = createScanProvider({ env: {
     OURMTG_DOCUMENT_SCAN_PROVIDER: 'mock', OURMTG_ALLOW_MOCK_SCAN: 'true', OURMTG_MOCK_SCAN_STATUS: 'clean',
   } })
-  assert.deepEqual(await scanner.scan({ bucket: 'b', path: 'p' }), { status: 'clean' })
+  assert.deepEqual(await scanner.scan({ bytes: Buffer.from('%PDF-1.7') }), { status: 'clean' })
   assert.equal(scanDecision({ status: 'unscanned' }, { required: true }).code, 'scan_not_configured')
   assert.equal(scanDecision({ status: 'infected' }, { required: false }).code, 'malware_detected')
   assert.equal(scanDecision({ status: 'clean' }, { required: true }).ok, true)
+})
+
+test('HTTP scanner receives one document body and no Supabase storage locator', async () => {
+  let received = null
+  const scanner = createScanProvider({
+    env: {
+      OURMTG_DOCUMENT_SCAN_PROVIDER: 'http',
+      OURMTG_DOCUMENT_SCAN_URL: 'https://scanner.internal/scan',
+      OURMTG_DOCUMENT_SCAN_TOKEN: 'scanner-secret',
+    },
+    fetchImpl: async (url, options) => {
+      received = { url, options }
+      return new Response(JSON.stringify({ status: 'clean' }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      })
+    },
+  })
+  const bytes = Buffer.from('%PDF-1.7\nprivate statement')
+  assert.deepEqual(await scanner.scan({
+    bytes, detectedContentType: 'application/pdf', correlationId: 'scan-1',
+  }), { status: 'clean' })
+  assert.equal(received.url, 'https://scanner.internal/scan')
+  assert.equal(received.options.headers.authorization, 'Bearer scanner-secret')
+  assert.equal(received.options.headers['x-document-content-type'], 'application/pdf')
+  assert.deepEqual(received.options.body, bytes)
+  assert.equal(String(received.options.body).includes('ourmtg-docs'), false)
 })

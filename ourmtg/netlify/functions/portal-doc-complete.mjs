@@ -80,7 +80,7 @@ export default async (req) => {
   catch {
     return json({ ok: false, error: 'Document security scanning is not configured.', code: 'scan_not_configured' }, 503)
   }
-  const scan = await scanner.scan({ bucket: BUCKET, path: doc.storage_path })
+  const scan = await scanner.scan({ bytes, detectedContentType: inspected.detectedContentType })
   const scanGate = scanDecision(scan, { required: documentScanRequired() })
   if (!scanGate.ok) {
     return json({ ok: false, error: scanGate.error, code: scanGate.code }, scanGate.status)

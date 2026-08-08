@@ -1,7 +1,6 @@
-// Malware-scanning boundary. A scanner is server-side and receives only the private storage
-// locator, never a public download URL. The configured service is responsible for reading that
-// object with its own narrowly scoped credentials. Missing configuration stays visibly
-// `unscanned`; pre-underwriting treats that as a blocker by default.
+// Malware-scanning boundary. A scanner receives only the bytes of the one document being
+// processed. It does not receive a Supabase locator, service-role key, or access to the bucket.
+// Missing configuration stays visibly `unscanned`; pre-underwriting blocks by default.
 
 import { serverFlag } from './featureFlags.mjs'
 
@@ -55,17 +54,21 @@ export function createScanProvider({ env = process.env, fetchImpl = globalThis.f
 
   return {
     name: 'http',
-    async scan({ bucket, path, correlationId = null }) {
+    async scan({ bytes, detectedContentType = null, correlationId = null }) {
+      if (!bytes || !Buffer.isBuffer(bytes) || bytes.byteLength === 0) {
+        return { status: 'error', detail: 'Scanner received no document bytes.' }
+      }
       let response
       try {
         response = await fetchImpl(url, {
           method: 'POST',
           headers: {
-            'content-type': 'application/json',
+            'content-type': 'application/octet-stream',
             authorization: `Bearer ${token}`,
+            ...(detectedContentType ? { 'x-document-content-type': detectedContentType } : {}),
             ...(correlationId ? { 'x-correlation-id': correlationId } : {}),
           },
-          body: JSON.stringify({ bucket, path }),
+          body: bytes,
           signal: AbortSignal.timeout(30_000),
         })
       } catch {

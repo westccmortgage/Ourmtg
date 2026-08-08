@@ -112,7 +112,11 @@ export default async (req) => {
     catch {
       return json({ ok: false, error: 'Document security scanning is not configured.', code: 'scan_not_configured' }, 503)
     }
-    const scan = await scanner.scan({ bucket: 'ourmtg-docs', path: document.storage_path, correlationId })
+    const scan = await scanner.scan({
+      bytes: Buffer.from(file.dataBase64, 'base64'),
+      detectedContentType: file.mediaType,
+      correlationId,
+    })
     const scanGate = scanDecision(scan, { required: preUnderwritingScanRequired() })
     if (!scanGate.ok) {
       logEvent('pu.intake.scan_blocked', {
