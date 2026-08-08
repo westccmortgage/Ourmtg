@@ -99,13 +99,31 @@ test('missing rollout tables degrade safely, while real classification errors fa
   }
   const missing = svcWith((table) => table === 'loan_files'
     ? { data: [], error: null }
-    : { data: null, error: { code: '42P01', message: 'relation does not exist' } })
+    : { data: null, error: { code: 'PGRST205', message: 'table is absent from schema cache' } })
   assert.equal(await isInternalUser(missing, BORROWER), false)
 
   const broken = svcWith((table) => table === 'loan_files'
     ? { data: null, error: { code: '08006', message: 'connection failed' } }
     : { data: [], error: null })
   await assert.rejects(() => isInternalUser(broken, BORROWER), /loan_files owner read/)
+})
+
+test('security status with enforcement OFF has no classification-table dependency', async () => {
+  setTestEnv({ OURMTG_INTERNAL_AAL2_ENFORCED: 'false' })
+  const fake = createFakeSupabase({ tables: {}, users: USERS })
+  const restore = install(fake)
+  try {
+    const handler = (await import(`../netlify/functions/portal-security-status.mjs?off=${Date.now()}`)).default
+    const response = await handler(makeRequest(
+      'https://app.test/.netlify/functions/portal-security-status',
+      { token: BORROWER_AAL1 },
+    ))
+    assert.equal(response.status, 200)
+    assert.deepEqual(await response.json(), {
+      ok: true, internal: null, aal: 'aal1', enforcementEnabled: false, mfaRequired: false,
+    })
+    assert.equal(fake.calls.filter((call) => call.path.startsWith('/rest/v1/')).length, 0)
+  } finally { restore() }
 })
 
 test('security status requires AAL2 for staff but not for borrowers', async () => {

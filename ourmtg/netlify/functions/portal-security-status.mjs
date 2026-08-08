@@ -20,9 +20,21 @@ export default async (req) => {
   const auth = await getUser(req)
   if (!auth) return json({ ok: false, error: 'Unauthorized' }, 401)
 
+  const enforcementEnabled = internalAal2Enabled()
+  // Default-off must also mean dependency-off. Do not let an optional rollout table or a
+  // classification read become a new availability dependency for the existing borrower portal.
+  if (!enforcementEnabled) {
+    return json({
+      ok: true,
+      internal: null,
+      aal: auth.aal,
+      enforcementEnabled: false,
+      mfaRequired: false,
+    })
+  }
+
   try {
     const internal = await isInternalUser(admin(), auth.user.id)
-    const enforcementEnabled = internalAal2Enabled()
     const decision = internalAal2Decision({ enabled: enforcementEnabled, internal, aal: auth.aal })
     return json({
       ok: true,

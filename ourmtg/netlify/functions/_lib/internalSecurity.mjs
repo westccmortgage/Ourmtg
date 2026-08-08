@@ -18,7 +18,10 @@ export function internalAal2Decision({ enabled, internal, aal }) {
 
 async function exists(query, label, { allowMissingTable = false } = {}) {
   const { data, error } = await query.limit(1)
-  if (allowMissingTable && error?.code === '42P01') return false
+  // Direct Postgres reports 42P01; PostgREST reports PGRST205 when the table is absent from its
+  // schema cache. Delta 043 is still review-only, so either shape means "not provisioned yet",
+  // not a reason to lock every borrower out of the existing portal.
+  if (allowMissingTable && ['42P01', 'PGRST205'].includes(error?.code)) return false
   if (error) throw new Error(`${label} read: ${error.message}`)
   return Array.isArray(data) && data.length > 0
 }
@@ -27,16 +30,14 @@ async function exists(query, label, { allowMissingTable = false } = {}) {
 // member, or active organization member. A borrower who is also staff is treated as staff.
 export async function isInternalUser(svc, userId) {
   if (!userId) return false
-  const [ownsFile, onLegacyTeam, inOrganization] = await Promise.all([
-    exists(svc.from('loan_files').select('id').eq('owner_user_id', userId), 'loan_files owner'),
-    exists(
-      svc.from('portal_team').select('id').eq('member_user_id', userId),
-      'portal_team member', { allowMissingTable: true },
-    ),
-    exists(
-      svc.from('organization_members').select('id').eq('user_id', userId).eq('status', 'active'),
-      'organization_members member', { allowMissingTable: true },
-    ),
-  ])
-  return ownsFile || onLegacyTeam || inOrganization
+  // Short-circuit known production relationships before touching the Phase 1C review-only table.
+  if (await exists(svc.from('loan_files').select('id').eq('owner_user_id', userId), 'loan_files owner')) return true
+  if (await exists(
+    svc.from('portal_team').select('id').eq('member_user_id', userId),
+    'portal_team member', { allowMissingTable: true },
+  )) return true
+  return exists(
+    svc.from('organization_members').select('id').eq('user_id', userId).eq('status', 'active'),
+    'organization_members member', { allowMissingTable: true },
+  )
 }
