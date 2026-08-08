@@ -234,7 +234,7 @@ function SiteSettingsCard() {
 }
 
 // My team: processors/assistants who get internal access to every file I own.
-// Add requires the person to have signed in once (magic link) so their account exists.
+// Add requires the person to have authenticated once so their account exists.
 function TeamCard() {
   const [members, setMembers] = useState(null)
   const [email, setEmail] = useState('')
@@ -292,7 +292,7 @@ function TeamCard() {
           </div>
         </div>
         <button className="btn btn-navy btn-sm" disabled={busy || !email}>{busy ? 'Adding…' : 'Add team member'}</button>
-        <p className="hint" style={{ marginTop: 8, marginBottom: 0 }}>They must sign in once at this site first (magic link) so their account exists.</p>
+        <p className="hint" style={{ marginTop: 8, marginBottom: 0 }}>They must sign in once at this site first so their account exists.</p>
       </form>
     </div>
   )

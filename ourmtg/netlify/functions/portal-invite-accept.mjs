@@ -1,6 +1,7 @@
 // POST /.netlify/functions/portal-invite-accept   (portal-user-authed, Bearer JWT)
 //
-// Half 2 of "mint/grant portal_access". After the invitee signs in via magic link,
+// Half 2 of "mint/grant portal_access". After the invitee authenticates with a verified
+// Google identity or email magic link,
 // the OurMTG app calls this with the invite token. It validates the token and MINTS
 // the portal_access grant + upserts the portal_users identity.
 //

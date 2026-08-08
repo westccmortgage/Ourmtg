@@ -59,6 +59,23 @@ export const UI = {
   backToHome:    { en: 'Back to home',       es: 'Volver al inicio',      ru: 'На главную' },
   language:      { en: 'Language',           es: 'Idioma',                ru: 'Язык' },
 
+  // Authentication
+  authEyebrow:    { en: 'Secure invited access', es: 'Acceso seguro por invitación', ru: 'Защищённый доступ по приглашению' },
+  authTitle:      { en: 'Open your secure workspace', es: 'Abre tu espacio seguro', ru: 'Откройте защищённый кабинет' },
+  authIntro:      { en: 'Use the account connected to your invitation or loan-team access.', es: 'Usa la cuenta asociada con tu invitación o acceso del equipo de préstamo.', ru: 'Используйте аккаунт, связанный с вашим приглашением или доступом кредитной команды.' },
+  authGoogle:     { en: 'Continue with Google', es: 'Continuar con Google', ru: 'Продолжить с Google' },
+  authOr:         { en: 'or',                 es: 'o',                     ru: 'или' },
+  authEmailHelp:  { en: 'Prefer email? We’ll send a one-time secure link. No password needed.', es: '¿Prefieres el correo? Te enviaremos un enlace seguro de un solo uso. No necesitas contraseña.', ru: 'Предпочитаете email? Мы пришлём одноразовую защищённую ссылку. Пароль не нужен.' },
+  authEmailLabel: { en: 'Email address',      es: 'Correo electrónico',    ru: 'Электронная почта' },
+  authEmailCta:   { en: 'Email me a secure link', es: 'Enviarme un enlace seguro', ru: 'Прислать защищённую ссылку' },
+  authSending:    { en: 'Sending…',           es: 'Enviando…',             ru: 'Отправка…' },
+  authOpening:    { en: 'Opening Google…',    es: 'Abriendo Google…',      ru: 'Открываем Google…' },
+  authCheckTitle: { en: 'Check your email',   es: 'Revisa tu correo',      ru: 'Проверьте почту' },
+  authCheckBody:  { en: 'We sent a secure sign-in link. Open it on this device to continue.', es: 'Enviamos un enlace seguro. Ábrelo en este dispositivo para continuar.', ru: 'Мы отправили защищённую ссылку. Откройте её на этом устройстве, чтобы продолжить.' },
+  authOtherEmail: { en: 'Use a different email', es: 'Usar otro correo',   ru: 'Использовать другой email' },
+  authGoogleError:{ en: 'Could not open Google sign-in. Please try again or use email.', es: 'No pudimos abrir el acceso con Google. Inténtalo de nuevo o usa el correo.', ru: 'Не удалось открыть вход через Google. Попробуйте снова или используйте email.' },
+  authEmailError: { en: 'Could not send your link. Please try again.', es: 'No pudimos enviar el enlace. Inténtalo de nuevo.', ru: 'Не удалось отправить ссылку. Попробуйте снова.' },
+
   // Home
   homeCtaBuild:  { en: 'Build my file — 60 sec', es: 'Arma mi expediente — 60 s', ru: 'Собрать моё дело — 60 сек' },
   homeCtaRealtor:{ en: 'I’m a Realtor',      es: 'Soy agente inmobiliario', ru: 'Я риелтор' },

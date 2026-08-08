@@ -1,5 +1,5 @@
 // Browser Supabase client (anon key). Used for:
-//   • magic-link auth (signInWithOtp / getSession / onAuthStateChange)
+//   • Google OAuth + magic-link fallback (signInWithOAuth / signInWithOtp / session refresh)
 //   • RLS-scoped direct reads the gateway doesn't expose (loan_conditions,
 //     loan_messages, portal_access) — RLS restricts every row to the caller
 //   • uploading a document to a server-minted signed URL (uploadToSignedUrl)

@@ -1,5 +1,5 @@
 // Invite redemption (spec §K.2 tail). The LO mints an invite link (/invite?token=…);
-// after the invitee signs in via magic link, this calls portal-invite-accept to mint the
+// after the invitee signs in with Google or an email link, this calls portal-invite-accept to mint the
 // portal_access grant (identity-bound, single-use), then routes into the portal.
 import { useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'

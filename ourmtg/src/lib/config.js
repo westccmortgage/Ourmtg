@@ -7,6 +7,12 @@ const env = import.meta.env
 export const SUPABASE_URL = env.VITE_SUPABASE_URL || ''
 export const SUPABASE_ANON_KEY = env.VITE_SUPABASE_ANON_KEY || ''
 
+// Presentation only. Supabase still has to enable the provider, and successful authentication
+// still grants no OurMTG access without portal_access, an invite, or a server-owned team role.
+// Default-off prevents a live button from appearing before the Google OAuth credentials and
+// redirect allowlist have been configured in the Supabase project.
+export const GOOGLE_AUTH_ENABLED = ['true', '1'].includes(String(env.VITE_GOOGLE_AUTH_ENABLED || '').toLowerCase())
+
 // Portal gateway base. Same-origin in production; overridable for `vite dev`.
 // Lead submission goes through this same base (the lead-submit proxy function), so the
 // GRCRM webhook token stays server-side and never ships in the browser bundle.

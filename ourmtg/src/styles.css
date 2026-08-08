@@ -130,6 +130,17 @@ small { color: var(--muted); }
 .btn-lg { padding: 16px 24px; font-size: 13px; }
 .btn-sm { padding: 8px 12px; font-size: 10.5px; }
 
+/* Sign-in — one clear primary action, with email kept as the universal fallback. */
+.auth-page { max-width: 460px; margin: 46px auto 64px; }
+.auth-page h1 { font-size: clamp(32px, 5vw, 46px); }
+.auth-intro { margin: 12px 0 24px; font-size: 15px; line-height: 1.55; }
+.auth-card { padding: 24px; }
+.btn-google { display: flex; align-items: center; justify-content: center; gap: 11px; background: #fff; color: #1f1f1f; }
+.btn-google:hover:not(:disabled) { background: #f4f2ec; }
+.google-mark { width: 18px; height: 18px; flex: 0 0 18px; }
+.auth-divider { display: flex; align-items: center; gap: 12px; margin: 22px 0; color: var(--muted); font: 600 10px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+.auth-divider::before, .auth-divider::after { content: ''; height: 1px; flex: 1; background: var(--soft); }
+
 /* Forms — ruled fields, mono labels */
 .field { margin-bottom: 16px; }
 .field label {
@@ -344,6 +355,8 @@ table.q tr:hover td { background: #f0ede4; cursor: pointer; }
 
 @media (max-width: 560px) {
   .gateway-hero { padding: 46px 0 40px; }
+  .auth-page { margin: 24px auto 44px; }
+  .auth-card { padding: 20px; }
   .workspace-nav { grid-template-columns: repeat(2, 1fr); }
   .workspace-page-head { flex-direction: column; }
   .grid4, .analysis-metrics { grid-template-columns: 1fr; }

@@ -1,5 +1,6 @@
-// Auth context: wraps the Supabase magic-link session and exposes { session, user,
-// loading, signInWithEmail, signOut }. Magic-link only — no passwords (spec §O).
+// Auth context: wraps the persisted Supabase session and exposes Google OAuth plus the email
+// magic-link fallback. Neither method authorizes a loan file: invite redemption, portal_access,
+// and internal-team relationships remain the server-owned authorization boundary.
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { supabase } from './supabase'
 import { isSupabaseConfigured } from './config'
@@ -29,13 +30,28 @@ export function AuthProvider({ children }) {
     if (error) throw error
   }, [])
 
+  const signInWithGoogle = useCallback(async (redirectTo) => {
+    const { error } = await supabase().auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: redirectTo || window.location.origin },
+    })
+    if (error) throw error
+  }, [])
+
   const signOut = useCallback(async () => {
     try { await supabase().auth.signOut() } catch { /* ignore */ }
     setSession(null)
   }, [])
 
   return (
-    <AuthCtx.Provider value={{ session, user: session?.user || null, loading, signInWithEmail, signOut }}>
+    <AuthCtx.Provider value={{
+      session,
+      user: session?.user || null,
+      loading,
+      signInWithGoogle,
+      signInWithEmail,
+      signOut,
+    }}>
       {children}
     </AuthCtx.Provider>
   )
