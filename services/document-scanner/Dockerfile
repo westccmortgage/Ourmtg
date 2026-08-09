@@ -1,7 +1,8 @@
 FROM node:22-bookworm-slim
 
 RUN apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clamav clamav-daemon clamdscan \
+  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates clamav clamav-daemon clamdscan \
+  && update-ca-certificates \
   && rm -rf /var/lib/apt/lists/* \
   && sed -i 's/^Foreground .*/Foreground true/' /etc/clamav/clamd.conf \
   && sed -i 's#^LocalSocket .*#LocalSocket /run/clamav/clamd.ctl#' /etc/clamav/clamd.conf
