@@ -2,20 +2,21 @@
 // required on every page per spec §M). Content is rendered via <Outlet/>.
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
-import { BRAND } from '../lib/config'
+import { BRAND, TEAM } from '../lib/config'
 import { useT, LangSwitch } from '../lib/i18n'
 
 export function ComplianceFooter() {
   const t = useT()
-  const nmls = [
-    BRAND.nmlsCompany && `Company NMLS #${BRAND.nmlsCompany}`,
-    BRAND.nmlsLo && `LO NMLS #${BRAND.nmlsLo}`,
-  ].filter(Boolean).join(' · ')
   return (
     <footer className="footer">
       <div className="container">
         <p className="eho">🏠 {t('footerEho')} · {BRAND.company}</p>
-        {nmls && <p>{nmls}</p>}
+        <p>
+          {BRAND.company} · Company NMLS #{TEAM.corporation.nmls} · CA DRE Corporation License #{TEAM.corporation.dreLicense}
+        </p>
+        <p>
+          {TEAM.officer.name} · NMLS #{TEAM.officer.nmls} · CA DRE Broker #{TEAM.officer.dreLicense}
+        </p>
         <p>
           Office: <a href={`tel:${BRAND.officePhone}`}>{BRAND.officePhone}</a>
           {BRAND.loPhone && <> · {BRAND.loName || 'Direct'}: <a href={`tel:${BRAND.loPhone}`}>{BRAND.loPhone}</a></>}
