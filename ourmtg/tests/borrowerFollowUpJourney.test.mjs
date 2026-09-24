@@ -357,3 +357,94 @@ test('a document removed before the worker reaches it fails the job instead of r
     assert.equal(messagesTo(fake).length, 0)
   } finally { restore() }
 })
+
+// ── the audit trail ─────────────────────────────────────────────────────────
+// Nobody is watching this run. The only way anyone reconstructs what it did — or answers a
+// borrower asking "why did nobody tell me?" — is the record it leaves behind, and a decision to
+// stay silent is exactly as much a decision as a decision to write.
+
+const auditOf = (fake, action) => fake.rowsOf('portal_access_log').filter((l) => l.action === action)
+
+test('every automatic read leaves a record, whatever its outcome', async () => {
+  const fake = world()
+  const restore = install(fake)
+  try {
+    const h = await handlers()
+    await h.complete(uploadDone(DOC))
+    await h.worker(tick())
+    const reads = auditOf(fake, 'pre_underwriting_intake_auto')
+    assert.equal(reads.length, 1)
+    assert.equal(reads[0].portal_user, null, 'the null actor IS the record that it was the system')
+    assert.equal(reads[0].loan_file_id, LOAN)
+    assert.match(String(reads[0].target), new RegExp(`^${DOC}:read$`))
+  } finally { restore() }
+})
+
+test('a read that never happened is still recorded as attempted', async () => {
+  const fake = world()
+  const restore = install(fake)
+  try {
+    const h = await handlers()
+    await h.complete(uploadDone(DOC))
+    fake.rowsOf('loan_documents').find((d) => d.id === DOC).reject_reason = '__REMOVED__:borrower'
+    await h.worker(tick())
+    const reads = auditOf(fake, 'pre_underwriting_intake_auto')
+    assert.equal(reads.length, 1, 'an attempt with no record is indistinguishable from no attempt')
+    assert.match(String(reads[0].target), /document_gone$/)
+  } finally { restore() }
+})
+
+test('a borrower message that IS sent is recorded', async () => {
+  const fake = world()
+  const restore = install(fake)
+  try {
+    const h = await handlers()
+    await h.complete(uploadDone(DOC))
+    await h.worker(tick())
+    const sent = auditOf(fake, 'borrower_followup_sent')
+    assert.equal(sent.length, 1)
+    assert.equal(sent[0].portal_user, null)
+    assert.match(String(sent[0].target), new RegExp(`^${DOC}:sent:\\d+$`))
+    // And the message itself is on the file, so the two agree.
+    assert.equal(messagesTo(fake).length, 1)
+  } finally { restore() }
+})
+
+test('a borrower message that is SUPPRESSED is recorded, with the reason', async () => {
+  // The half that is easy to leave out and impossible to reconstruct later.
+  const fake = world()
+  const restore = install(fake)
+  try {
+    const h = await handlers()
+    await h.complete(uploadDone(DOC))
+    await h.worker(tick())
+    const before = messagesTo(fake).length
+
+    // A second identical run: nothing changed, so nothing is said — and that is minuted.
+    fake.rowsOf('document_read_jobs').find((j) => j.document_id === DOC).status = 'queued'
+    await h.worker(tick())
+
+    assert.equal(messagesTo(fake).length, before, 'the borrower must not be told twice')
+    const suppressed = auditOf(fake, 'borrower_followup_suppressed')
+    assert.equal(suppressed.length, 1, 'silence must be minuted')
+    assert.match(String(suppressed[0].target), new RegExp(`^${DOC}:unchanged$`))
+    assert.equal(suppressed[0].portal_user, null)
+  } finally { restore() }
+})
+
+test('every tick accounts for itself: a read, a message decision, or both', async () => {
+  const fake = world()
+  const restore = install(fake)
+  try {
+    const h = await handlers()
+    await h.complete(uploadDone('d0d0d0d0-d0d0-4d0d-8d0d-d0d0d0d0d000'))
+    await h.complete(uploadDone(DOC))
+    await h.worker(tick())
+
+    const reads = auditOf(fake, 'pre_underwriting_intake_auto').length
+    const decisions = auditOf(fake, 'borrower_followup_sent').length
+      + auditOf(fake, 'borrower_followup_suppressed').length
+    assert.equal(reads, 2, 'both documents were read, and both reads are on the record')
+    assert.equal(decisions, 2, 'each read reached a message decision, and each decision is minuted')
+  } finally { restore() }
+})

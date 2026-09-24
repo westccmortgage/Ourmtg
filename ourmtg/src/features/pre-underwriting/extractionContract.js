@@ -495,10 +495,17 @@ export function toPart(validated) {
   for (const f of v.fields) part[f.name] = f.value
   // Carried alongside the fields because completeness has to be able to ask for a clearer copy,
   // and "the reader could not make this out" is not something any single field records.
-  // `legible` and `docKeyMismatch` are response-level properties, never field names, so they
-  // cannot collide with an extracted value.
+  // These are response-level properties, never field names, so they cannot collide with an
+  // extracted value.
   part.legible = v.legible !== false
   part.docKeyMismatch = Boolean(v.docKeyMismatch)
+  // HOW MUCH THIS READ CAN BE TRUSTED. Carried because everything downstream of here — most of
+  // all an automatic message to a borrower — has to be able to ask. A gap computed from values
+  // the reader itself was unsure of is not a fact to act on: "page 6 is missing" read at 0.19
+  // confidence sends someone hunting for a page that may not exist.
+  part.needsHumanReview = Boolean(v.needsHumanReview)
+  part.reviewReasons = v.reviewReasons || []
+  part.minFieldConfidence = v.minFieldConfidence ?? null
   if (v.docKey === 'tax_return_full') {
     // Completeness needs the form inventory only to name missing years/forms. Confidence and
     // amounts stay in their own paths; no tax conclusion reaches the borrower checklist.

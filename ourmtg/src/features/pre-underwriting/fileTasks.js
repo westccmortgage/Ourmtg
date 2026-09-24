@@ -169,18 +169,44 @@ export function buildFileTasks(input = {}) {
   // makes these safe to show the borrower verbatim, and the reason this module does not write
   // its own document sentences.
   for (const miss of missingForFile(checklist, byType, opts)) {
-    tasks.push({
-      id: `document:${miss.docKey}`,
-      kind: 'document',
-      section: DOCUMENT_SECTION[miss.docKey] || 'documents',
-      owner: miss.providedBy === 'loan_team' ? 'loan_team' : 'borrower',
-      title: miss.label,
-      // Each gap is its own sentence; the screen renders them as a list under the document.
-      requests: miss.gaps.map((g) => g.message),
-      detail: miss.gaps[0]?.message || null,
-      docKey: miss.docKey,
-      blocking: true,
-    })
+    const section = DOCUMENT_SECTION[miss.docKey] || 'documents'
+    const owner = miss.providedBy === 'loan_team' ? 'loan_team' : 'borrower'
+    // What the reader said about its OWN reliability on this document type. A gap computed from
+    // values the model was unsure of is not something to put in front of a borrower as a fact.
+    const shaky = readNeedsReview(byType?.[miss.docKey])
+    const { forBorrower, forTeam } = splitGaps(miss.gaps, shaky)
+
+    if (forBorrower.length) {
+      tasks.push({
+        id: `document:${miss.docKey}`,
+        kind: 'document',
+        section,
+        owner,
+        title: miss.label,
+        // Each gap is its own sentence; the screen renders them as a list under the document.
+        requests: forBorrower.map((g) => g.message),
+        detail: forBorrower[0]?.message || null,
+        docKey: miss.docKey,
+        blocking: true,
+      })
+    }
+
+    // Everything a person has to look at before anyone is asked for anything. Emitted as
+    // human_review so it is structurally incapable of reaching the borrower, and `blocking` so
+    // the file cannot read as complete while a document is genuinely still short.
+    if (forTeam.length) {
+      tasks.push({
+        id: `document_review:${miss.docKey}`,
+        kind: 'human_review',
+        section,
+        owner: 'loan_team',
+        title: `${miss.label} — a person should look at this before we ask the borrower`,
+        detail: forTeam.map((g) => g.message).join(' '),
+        docKey: miss.docKey,
+        reviewReasons: shaky.reasons,
+        blocking: true,
+      })
+    }
   }
 
   // ── Credit authorization ─────────────────────────────────────────────────
@@ -240,6 +266,59 @@ export function buildFileTasks(input = {}) {
     sections: rollup(tasks, report, checklist, byType, opts),
     operational: operationalState(tasks, report, checklist),
   }
+}
+
+/**
+ * Gaps that are never sent to a borrower automatically, whatever the read confidence.
+ *
+ * `ownership_unclear` is here for a reason worth stating: the message it produces quotes the
+ * name read off the document. If a document was ever filed onto the wrong loan — the ordinary
+ * clerical slip this check exists to catch — sending it automatically would disclose a THIRD
+ * PARTY's name to whoever holds this borrower's portal login. It is also, by construction,
+ * uncertain, and the brief is explicit that uncertainty stays out of automatic borrower
+ * messages. A person asks that question.
+ */
+const NEVER_AUTOMATIC = new Set(['ownership_unclear'])
+
+/**
+ * Gaps that survive a low-confidence read.
+ *
+ * "We could not read this, please send a clearer copy" is the one request whose truth does NOT
+ * depend on any extracted value — it is the reader's verdict on itself, and it is the most
+ * useful thing a borrower can be told about an unreadable upload. "We still need this document"
+ * likewise: it is computed from the absence of an upload, not from anything read out of one.
+ */
+const SAFE_WHEN_UNSURE = new Set(['illegible', 'not_provided', 'unknown_type'])
+
+/** Did the reader flag its own work on this document type as needing a person? */
+function readNeedsReview(parts) {
+  const reasons = new Set()
+  for (const p of parts || []) {
+    if (!p?.needsHumanReview) continue
+    for (const r of p.reviewReasons || []) reasons.add(r)
+    if (!(p.reviewReasons || []).length) reasons.add('needs_human_review')
+  }
+  return { unsure: reasons.size > 0, reasons: [...reasons] }
+}
+
+/**
+ * Who may be told about each gap.
+ *
+ * THE RULE: a borrower is asked only for things we are confident about. A specific request
+ * derived from a shaky read — "page 6 is missing", where the page count was read at 0.19
+ * confidence off a document the reader called illegible — sends someone hunting for a page that
+ * may not exist, and does it in the same breath as admitting we could not read the document.
+ * That is uncertainty presented as fact, which is the one thing this product may not do.
+ */
+function splitGaps(gaps, shaky) {
+  const forBorrower = []
+  const forTeam = []
+  for (const g of gaps || []) {
+    if (NEVER_AUTOMATIC.has(g.code) || g.needsConfirmation) forTeam.push(g)
+    else if (shaky.unsure && !SAFE_WHEN_UNSURE.has(g.code)) forTeam.push(g)
+    else forBorrower.push(g)
+  }
+  return { forBorrower, forTeam }
 }
 
 /**

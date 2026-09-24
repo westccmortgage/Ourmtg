@@ -272,6 +272,92 @@ DEFAULTS="$(scalar "select attempts::text||'/'||max_attempts::text||'/'||request
 psql -q "$DB" -v ON_ERROR_STOP=1 -f "${ROOT}/supabase/delta/009_document_read_queue.sql" >/dev/null 2>&1 \
   && ok "009 is safe to re-run" || bad "009 is not idempotent"
 
+# Server-only is a claim about what a SIGNED-IN BROWSER can reach, and the grants table alone
+# does not prove it. Here the queue is queried as the actual anon and authenticated roles, with
+# a JWT subject set, which is as close to the real thing as a shimmed database gets.
+#
+# NOT proven here: GoTrue, real JWT signing, PostgREST's role switching, or Supabase's own
+# storage API. Those need a real project.
+echo "== role-level access to the read queue (delta 009) =="
+
+# A control first. If EVERY query below fails, it could be failing for the wrong reason — a
+# broken harness rather than a working guard. loan_messages is readable by a borrower with
+# portal_access, so it proves the role switch and auth.uid() are actually working.
+psql -q "$DB" >/dev/null 2>&1 <<SQL
+insert into portal_access (portal_user, loan_file_id, visibility)
+  values ('${LO}','${LF}','borrower') on conflict do nothing;
+insert into loan_messages (loan_file_id, owner_user_id, direction, author_role, body)
+  values ('${LF}','${LO}','out','assistant','control row');
+SQL
+CONTROL="$(psql -qtA "$DB" -c "set local role authenticated;
+  set local request.jwt.claim.sub = '${LO}';
+  select count(*) from loan_messages;" 2>&1 | tail -1)"
+[ "$CONTROL" = "1" ] && ok "control: a signed-in borrower CAN read their own timeline" \
+  || bad "control failed (${CONTROL}) -- the denials below would prove nothing"
+
+for ROLE in anon authenticated; do
+  OUT="$(psql -qtA "$DB" -c "set local role ${ROLE};
+    set local request.jwt.claim.sub = '${LO}';
+    select count(*) from document_read_jobs;" 2>&1 | tail -1 || true)"
+  case "$OUT" in
+    *"permission denied"*) ok "${ROLE} cannot read the queue (permission denied)" ;;
+    0) ok "${ROLE} reads zero rows (RLS with no policy)" ;;
+    *) bad "${ROLE} reached the queue: ${OUT}" ;;
+  esac
+  for VERB in \
+    "insert into document_read_jobs (loan_file_id,document_id) values ('${LF}','00000000-0000-4000-8000-0000000d0c01')" \
+    "update document_read_jobs set status='done'" \
+    "delete from document_read_jobs"
+  do
+    OUT="$(psql -qtA "$DB" -c "set local role ${ROLE};
+      set local request.jwt.claim.sub = '${LO}'; ${VERB};" 2>&1 | tail -1 || true)"
+    VERBNAME="$(echo "$VERB" | awk '{print $1}')"
+    case "$OUT" in
+      *"permission denied"*|*"violates row-level security"*|*"no rows"*)
+        ok "${ROLE} cannot ${VERBNAME} the queue" ;;
+      "UPDATE 0"|"DELETE 0") ok "${ROLE} ${VERBNAME} affected nothing (RLS with no policy)" ;;
+      *) bad "${ROLE} could ${VERBNAME}: ${OUT}" ;;
+    esac
+  done
+done
+
+# And the role the worker actually runs as must still work, or the feature is simply broken.
+SVC="$(psql -qtA "$DB" -c "set local role service_role;
+  select count(*) >= 0 from document_read_jobs;" 2>&1 | tail -1 || true)"
+[ "$SVC" = "t" ] && ok "service_role reaches the queue (bypassrls), as the worker requires" \
+  || bad "service_role cannot reach the queue: ${SVC}"
+
+# The rollback has to be as rehearsed as the migration. An unexercised rollback is a plan, not
+# a procedure, and it gets exercised for the first time during an incident.
+echo "== read queue rollback (delta 009) =="
+# Roll back against a queue that is NOT empty — a rollback only ever runs mid-incident, with
+# work in flight. The live-job index means this document already has a queued row from the
+# section above, so promote that one to 'running' rather than inserting a second.
+psql -q "$DB" -c "update document_read_jobs set status='running', claimed_at=now()
+  where document_id='00000000-0000-4000-8000-0000000d0c01' and status='queued';" >/dev/null 2>&1 || true
+INFLIGHT="$(scalar "select count(*) from document_read_jobs where status in ('queued','running');")"
+[ "$INFLIGHT" -gt 0 ] && ok "rollback is rehearsed against work in flight (${INFLIGHT} live job(s))" \
+  || bad "the rollback rehearsal has nothing in flight, so it proves less than it looks"
+psql -v ON_ERROR_STOP=1 -q "$DB" -f "${ROOT}/supabase/delta/009_document_read_queue_rollback.sql" >/dev/null 2>&1 \
+  && ok "the rollback runs against a queue with live rows" || bad "rollback failed"
+GONE="$(scalar "select (to_regclass('public.document_read_jobs') is null)::text;")"
+[ "$GONE" = "true" ] && ok "the queue table is gone" || bad "queue table survived: $GONE"
+STRAY="$(scalar "select count(*) from pg_indexes where schemaname='public' and indexname like 'document_read_jobs%';")"
+[ "$STRAY" = "0" ] && ok "no stray indexes left behind" || bad "stray indexes: $STRAY"
+# What the rollback must NOT take with it: everything the reads actually produced.
+KEPT009="$(scalar "select (to_regclass('public.document_extractions') is not null
+                        and to_regclass('public.pre_underwriting_findings') is not null
+                        and to_regclass('public.loan_documents') is not null)::text;")"
+[ "$KEPT009" = "true" ] && ok "extractions, findings and documents survive the rollback" \
+  || bad "the rollback took conclusions with it: $KEPT009"
+psql -v ON_ERROR_STOP=1 -q "$DB" -f "${ROOT}/supabase/delta/009_document_read_queue_rollback.sql" >/dev/null 2>&1 \
+  && ok "the rollback is safe to run twice" || bad "rollback is not idempotent"
+# Roll forward again: an incident that gets fixed has to be able to re-enable the feature.
+psql -v ON_ERROR_STOP=1 -q "$DB" -f "${ROOT}/supabase/delta/009_document_read_queue.sql" >/dev/null 2>&1 \
+  && ok "009 re-applies cleanly after a rollback" || bad "cannot roll forward again"
+RELIVE="$(scalar "select count(*) from pg_indexes where schemaname='public' and indexname='document_read_jobs_live_doc_idx';")"
+[ "$RELIVE" = "1" ] && ok "the live-job guarantee is back after rolling forward" || bad "index missing after re-apply: $RELIVE"
+
 echo "== cascade =="
 psql -q "$DB" -c "delete from loan_files where id='${LF}';" >/dev/null
 LEFT=$(scalar "select (select count(*) from mortgage_applications)+(select count(*) from application_parties)

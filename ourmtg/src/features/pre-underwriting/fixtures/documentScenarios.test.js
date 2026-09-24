@@ -106,17 +106,44 @@ for (const s of SCENARIOS) {
   })
 }
 
-test('every scenario a borrower must act on produces a borrower-safe ask', () => {
-  // The whole point of the deterministic layer: these sentences go straight to a borrower.
+// Scenarios where the document is short but the borrower must NOT be asked automatically —
+// because the ask would quote a third party's name, or would be a confident claim built on
+// values the reader itself flagged as unreliable. These become a person's job instead.
+const TEAM_ONLY = new Set(['wrong_owner'])
+
+const tasksFor = (s) => buildFileTasks({
+  checklist: [{ docKey: s.docKey }],
+  byType: { [s.docKey]: partsFor(s) },
+  credit: { authorized: true },
+  asOf: AS_OF, borrowerName: BORROWER_NAME,
+}).tasks
+
+test('an incomplete document always becomes somebody’s job', () => {
+  // Weaker than "the borrower is always asked", and deliberately: the audit established that
+  // some gaps must not be sent automatically. What may never happen is a short document that
+  // nobody is working — that is how a file stalls silently.
   for (const s of SCENARIOS) {
     if (!('complete' in s.expect) || s.expect.complete) continue
-    const { tasks } = buildFileTasks({
-      checklist: [{ docKey: s.docKey }],
-      byType: { [s.docKey]: partsFor(s) },
-      credit: { authorized: true },
-      asOf: AS_OF, borrowerName: BORROWER_NAME,
-    })
+    const tasks = tasksFor(s)
+    assert.ok(tasks.some((t) => t.blocking), `${s.key} produced no work for anyone`)
+  }
+})
+
+test('a borrower is asked only where the ask is safe, and never otherwise', () => {
+  for (const s of SCENARIOS) {
+    if (!('complete' in s.expect) || s.expect.complete) continue
+    const tasks = tasksFor(s)
     const mine = borrowerView(tasks)
+
+    if (TEAM_ONLY.has(s.key)) {
+      assert.equal(mine.length, 0, `${s.key} must not reach the borrower automatically`)
+      assert.ok(
+        tasks.some((t) => t.kind === 'human_review' && t.blocking),
+        `${s.key} was withheld from the borrower and given to nobody`,
+      )
+      continue
+    }
+
     assert.ok(mine.length > 0, `${s.key} produced nothing for the borrower to do`)
     // Only what a borrower READS. `docKey` is a routing field the screen uses to open the right
     // upload; asserting against the serialized object would flag the key name itself, which is
@@ -126,6 +153,69 @@ test('every scenario a borrower must act on produces a borrower-safe ask', () =>
       assert.ok(!forbidden.test(said), `${s.key} leaked ${forbidden}: ${said.slice(0, 200)}`)
     }
   }
+})
+
+test('a name read off a document is never quoted to the borrower automatically', () => {
+  // The clerical slip this guards: a document filed onto the wrong loan. Sending the ownership
+  // question automatically would disclose a stranger's name to whoever holds this portal login.
+  const s = scenario('wrong_owner')
+  const tasks = tasksFor(s)
+  const said = JSON.stringify(borrowerView(tasks))
+  assert.ok(!said.includes('Priya'), said)
+  assert.ok(!said.includes('Okonkwo'), said)
+  // The team, meanwhile, gets the whole question.
+  const review = tasks.find((t) => t.kind === 'human_review')
+  assert.match(review.detail, /Priya Okonkwo-Silva/)
+})
+
+test('a shaky read never becomes a confident demand', () => {
+  // The finding this test exists for: an extraction flagged needsHumanReview, minFieldConfidence
+  // 0.19, legible false — and the borrower was still told "page 6 is still missing", in the same
+  // message that admitted we could not read the document.
+  const shaky = {
+    docKey: 'bank_2mo', docKeyConfidence: 0.41, legible: false,
+    fields: [
+      { name: 'institutionName', value: 'Northharbor Savings Bank', confidence: 0.28 },
+      { name: 'statementMonth', value: '2026-09', confidence: 0.33 },
+      { name: 'statementEnd', value: '2026-09-28', confidence: 0.31 },
+      { name: 'pagesSeen', value: '1-5, 7', confidence: 0.22 },
+      { name: 'pagesTotal', value: 7, confidence: 0.19 },
+    ],
+  }
+  const solid = {
+    docKey: 'bank_2mo', docKeyConfidence: 0.97, legible: true,
+    fields: [
+      { name: 'institutionName', value: 'Northharbor Savings Bank', confidence: 0.95 },
+      { name: 'statementMonth', value: '2026-08', confidence: 0.96 },
+      { name: 'statementEnd', value: '2026-08-28', confidence: 0.96 },
+      { name: 'pagesSeen', value: '1-7', confidence: 0.95 },
+      { name: 'pagesTotal', value: 7, confidence: 0.95 },
+    ],
+  }
+  const byType = {
+    bank_2mo: [shaky, solid]
+      .map((r) => toPart(validateExtractionResponse(r, { expectedDocKey: 'bank_2mo' })))
+      .filter(Boolean),
+  }
+  const { tasks } = buildFileTasks({
+    checklist: [{ docKey: 'bank_2mo' }], byType,
+    credit: { authorized: true }, asOf: AS_OF, borrowerName: BORROWER_NAME,
+  })
+
+  const told = composeFollowUp({ tasks, justRead: 'bank statement' })
+  assert.equal(told.send, true)
+  // The honest, actionable half survives…
+  assert.match(told.body, /clearer photo or scan/i)
+  // …and the claim that rested on a 0.19-confidence page count does not.
+  assert.ok(!/Page 6/.test(told.body), told.body)
+  assert.ok(!/pages 1–5 and 7/.test(told.body), told.body)
+
+  // It is not lost, though — a person is given it, with the reader's own reasons attached.
+  const review = tasks.find((t) => t.kind === 'human_review' && t.docKey === 'bank_2mo')
+  assert.ok(review, 'the specific gap was dropped instead of escalated')
+  assert.match(review.detail, /Page 6 is still missing/)
+  assert.ok(review.reviewReasons.includes('low_confidence_fields'), review.reviewReasons.join(','))
+  assert.ok(review.blocking, 'the file must not read as complete while this is open')
 })
 
 test('the follow-up for a missing page names the page, end to end', () => {

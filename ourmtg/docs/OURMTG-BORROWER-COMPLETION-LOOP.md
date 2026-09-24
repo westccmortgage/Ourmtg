@@ -65,6 +65,34 @@ Silence is the default. Nothing is sent unless the outstanding set actually chan
 last thing we said — a borrower who gets a message every time a background job runs stops
 reading them, and the one that mattered is the one they skipped.
 
+### Why it only speaks when it is sure
+
+A request is sent automatically only when it does not rest on a value the reader was unsure of.
+`validateExtractionResponse` already decides whether a read `needsHumanReview` — low-confidence
+classification, low-confidence fields, an illegible page — and that verdict now travels on the
+part and is consulted before anything reaches a borrower.
+
+The failure this prevents, found during the pre-production audit and now pinned by a test: an
+extraction with `minFieldConfidence: 0.19` on a document the reader itself called illegible
+produced the message *"We could not read your September statement clearly enough"* immediately
+followed by *"We received pages 1–5 and 7. Page 6 is still missing."* The second sentence is a
+confident claim built entirely on values from the document we had just said we could not read,
+and it sends someone hunting for a page that may not exist.
+
+Two rules, in `fileTasks.js`:
+
+- **`SAFE_WHEN_UNSURE`** — `illegible`, `not_provided`, `unknown_type`. These survive a shaky
+  read because their truth does not depend on any extracted value: the first is the reader's
+  verdict on itself, the others are computed from the absence of an upload.
+- **`NEVER_AUTOMATIC`** — `ownership_unclear`, and anything carrying `needsConfirmation`. The
+  ownership message quotes the name read off the document; if a document was ever filed onto the
+  wrong loan — the ordinary clerical slip that check exists to catch — sending it automatically
+  would disclose a third party's name to whoever holds this borrower's portal login.
+
+Everything else, when the read is shaky, becomes a blocking `human_review` task carrying the
+reader's own reasons. Nothing is dropped: the file still cannot read as complete, and a person
+is given the specific gap.
+
 ---
 
 ## 3. The audience rule
@@ -159,6 +187,10 @@ Uncertainty is never converted into fact anywhere in this layer. A value that wa
 `null`, not `0` — `Number('')` and `Number(null)` both being `0` has been a live bug in this
 codebase three separate times.
 
+`completeness.js` reports everything it sees, including gaps derived from shaky reads. Deciding
+who may be TOLD is `fileTasks.js`'s job, not this layer's — see "Why it only speaks when it is
+sure" above. Keeping the two apart means a processor still gets the full picture.
+
 ---
 
 ## 7. The ARIVE handoff
@@ -199,6 +231,28 @@ and screenshots; it is the least controlled surface in the product, and nothing 
 | one live job per document | partial unique index — a double tap cannot read (and bill for) the same PDF twice |
 | worker reachability | Netlify scheduled functions have no public URL. `OURMTG_READ_WORKER_KEY` guards the non-scheduled path and fails closed when unset |
 | settled vs retryable | a refusal, an unreadable format or an infected file stops; a timeout or provider error goes back on the queue |
+| claim fencing | `finish()` guards on `claimed_at`, not on status. When a stalled worker's job has been reclaimed the row IS `running` — B is running it — so status alone cannot tell the two apart. The claim timestamp is set afresh on every claim and is the fencing token |
+| rollback | `supabase/delta/009_document_read_queue_rollback.sql`. Stop the worker first (`PRE_UNDERWRITING_ENABLED=false` is fastest), then drop. Rehearsed against a queue with work in flight, twice, and rolled forward again |
+
+### The audit trail
+
+Nobody is watching this run, so the record it leaves is the only account of what it did. Every
+row is written with `portal_user = null`: no person did it, and that null IS the record that it
+was the system.
+
+| action | target | when |
+|---|---|---|
+| `pre_underwriting_intake_auto` | `<documentId>:read` | a read succeeded |
+| `pre_underwriting_intake_auto` | `<documentId>:<code>` | a read failed, refused, or threw |
+| `pre_underwriting_intake_auto` | `<documentId>:document_gone` | the document had been removed before the worker reached it |
+| `borrower_followup_sent` | `<documentId>:sent:<outstanding>` | a message was written |
+| `borrower_followup_suppressed` | `<documentId>:<reason>` | a message was deliberately not written |
+
+Suppression reasons: `unchanged` (the borrower already has this ask), `nothing_to_say`,
+`read_will_retry`, `claim_lost`, `insert_failed`, `error`. A decision to stay silent is exactly
+as much a decision as a decision to write, and it is the half that is impossible to reconstruct
+afterwards if it is not recorded. Targets are ids and fixed codes only — no document content and
+no borrower text ever enters the audit log.
 
 ### Feature flags
 
