@@ -27,6 +27,13 @@ const PARTIAL_UNIQUE = {
     keys: ['loan_file_id', 'dedupe_key'],
     where: (r) => r.superseded_by === null || r.superseded_by === undefined,
   },
+  // Delta 009's live-job index. Without it here, the "an upload enqueued twice reads the PDF
+  // once" test would pass because the fake let the second row in, not because the guarantee
+  // holds — and the guarantee is what stops a borrower's double-tap being billed twice.
+  document_read_jobs: {
+    keys: ['document_id'],
+    where: (r) => r.status === 'queued' || r.status === 'running',
+  },
 }
 
 let counter = 0
@@ -58,10 +65,16 @@ export function createFakeSupabase({ tables = {}, users = {}, storage = {} } = {
       // `is.null` matters more than it looks: the pre-underwriting repo selects live rows with
       // .is('superseded_by', null), and an unimplemented operator here is silently ignored — the
       // query returns superseded rows too and the test passes for the wrong reason.
-      const m = /^(eq|in|neq|is)\.(.*)$/s.exec(raw)
+      const m = /^(eq|in|neq|is|lt|lte|gt|gte)\.(.*)$/s.exec(raw)
       if (!m) continue
       const [, op, value] = m
-      if (op === 'is') {
+      // Timestamp comparisons: the read queue reclaims a claim that a dead worker is still
+      // holding with .lt('claimed_at', cutoff). ISO-8601 strings sort lexicographically, which
+      // is why a string compare is the right one here and not a lucky accident.
+      if (['lt', 'lte', 'gt', 'gte'].includes(op)) {
+        const cmp = { lt: (a, b) => a < b, lte: (a, b) => a <= b, gt: (a, b) => a > b, gte: (a, b) => a >= b }[op]
+        out = out.filter((r) => r[key] !== null && r[key] !== undefined && cmp(String(r[key]), value))
+      } else if (op === 'is') {
         const wantNull = value === 'null'
         out = out.filter((r) => (r[key] === null || r[key] === undefined) === wantNull)
       } else if (op === 'eq') out = out.filter((r) => String(r[key] ?? '') === value)

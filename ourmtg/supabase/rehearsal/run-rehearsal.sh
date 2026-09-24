@@ -49,7 +49,9 @@ for f in \
   "${ROOT}/supabase/delta/004_protect_loan_files.sql" \
   "${ROOT}/supabase/delta/005_team_assisted_application.sql" \
   "${ROOT}/supabase/delta/006_pre_underwriting.sql" \
-  "${ROOT}/supabase/delta/007_finding_identity.sql"
+  "${ROOT}/supabase/delta/007_finding_identity.sql" \
+  "${ROOT}/supabase/delta/008_security_compliance_readiness.sql" \
+  "${ROOT}/supabase/delta/009_document_read_queue.sql"
 do
   name="$(basename "$f")"
   if psql -v ON_ERROR_STOP=1 -q "$DB" -f "$f" >/dev/null 2>/tmp/rehearsal_err; then
@@ -232,18 +234,59 @@ AUTH_OK="$(psql -qtA "$DB" -c "insert into credit_authorizations
 [ "$AUTH_OK" = "1" ] && ok "a borrower's authorization is recorded with what they were shown" \
   || bad "authorization insert failed: $AUTH_OK"
 
+# Delta 009 — the read queue. The load-bearing part is the live-job index: a borrower's double
+# tap, or a retry that lands while the first read is still running, must not read (and bill for)
+# the same PDF twice.
+echo "== document read queue (delta 009) =="
+Q009=$(scalar "select jsonb_build_object(
+  'tbl', to_regclass('public.document_read_jobs') is not null,
+  'rls', (select relrowsecurity from pg_class where oid='public.document_read_jobs'::regclass),
+  'browser', (select count(*) from information_schema.role_table_grants
+              where table_schema='public' and table_name='document_read_jobs'
+              and grantee in ('anon','authenticated')))")
+[ "$(echo "$Q009" | grep -o '"tbl": true')" ] && ok "the read queue exists" || bad "queue: $Q009"
+[ "$(echo "$Q009" | grep -o '"rls": true')" ] && ok "RLS on the read queue" || bad "RLS: $Q009"
+[ "$(echo "$Q009" | grep -o '"browser": 0')" ] && ok "the browser cannot touch the read queue" || bad "grants: $Q009"
+
+psql -q "$DB" >/dev/null 2>&1 <<SQL
+insert into loan_documents (id,loan_file_id,owner_user_id,doc_key,label,status,storage_path)
+  values ('00000000-0000-4000-8000-0000000d0c01','${LF}','${LO}','bank_2mo','bank_2mo','uploaded','f/a.pdf');
+insert into document_read_jobs (loan_file_id,document_id)
+  values ('${LF}','00000000-0000-4000-8000-0000000d0c01');
+SQL
+rejects "the same document cannot have two live read jobs" \
+  "insert into document_read_jobs (loan_file_id,document_id)
+   values ('${LF}','00000000-0000-4000-8000-0000000d0c01');" "duplicate key value"
+rejects "a job status is a closed vocabulary" \
+  "insert into document_read_jobs (loan_file_id,document_id,status)
+   values ('${LF}','00000000-0000-4000-8000-0000000d0c02','vibes');" "violates check constraint"
+psql -q "$DB" -c "update document_read_jobs set status='done' where document_id='00000000-0000-4000-8000-0000000d0c01';" >/dev/null 2>&1
+REQUEUE="$(psql -qtA "$DB" -c "insert into document_read_jobs (loan_file_id,document_id)
+   values ('${LF}','00000000-0000-4000-8000-0000000d0c01') returning 1;" 2>&1)"
+[ "$REQUEUE" = "1" ] && ok "a finished job frees the document to be re-read after a re-upload" \
+  || bad "re-upload could not be queued: $REQUEUE"
+DEFAULTS="$(scalar "select attempts::text||'/'||max_attempts::text||'/'||requested_by
+                    from document_read_jobs where status='queued' limit 1;")"
+[ "$DEFAULTS" = "0/3/borrower_upload" ] && ok "a new job starts with no attempts and a bounded ceiling" \
+  || bad "queue defaults drifted: $DEFAULTS"
+psql -q "$DB" -v ON_ERROR_STOP=1 -f "${ROOT}/supabase/delta/009_document_read_queue.sql" >/dev/null 2>&1 \
+  && ok "009 is safe to re-run" || bad "009 is not idempotent"
+
 echo "== cascade =="
 psql -q "$DB" -c "delete from loan_files where id='${LF}';" >/dev/null
 LEFT=$(scalar "select (select count(*) from mortgage_applications)+(select count(*) from application_parties)
-               +(select count(*) from application_turns)+(select count(*) from application_field_state);")
+               +(select count(*) from application_turns)+(select count(*) from application_field_state)
+               +(select count(*) from document_read_jobs);")
 [ "$LEFT" = "0" ] && ok "deleting the loan file removes all application data" || bad "orphan rows left: $LEFT"
 
 echo "== rollback =="
 if psql -v ON_ERROR_STOP=1 -q "$DB" -c "begin;
-  drop table credit_authorizations, pre_underwriting_findings, document_extractions,
-             application_attestations, application_secure_fields, application_turns,
-             application_field_state, application_field_events, application_parties,
-             mortgage_applications; commit;" >/dev/null 2>&1
+  drop table application_compliance_snapshots, record_retention_events,
+             document_security_assessments, compliance_catalog_versions,
+             document_read_jobs, credit_authorizations, pre_underwriting_findings,
+             document_extractions, application_attestations, application_secure_fields,
+             application_turns, application_field_state, application_field_events,
+             application_parties, mortgage_applications; commit;" >/dev/null 2>&1
   then ok "rollback drops cleanly in dependency order"; else bad "rollback failed"; fi
 KEPT=$(scalar "select count(*) from information_schema.tables where table_schema='public'
                and table_name in ('loan_files','portal_access','loan_documents','statement_income_analyses');")

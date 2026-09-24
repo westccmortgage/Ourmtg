@@ -47,6 +47,10 @@ export const CLASSIFY_CONFIDENCE_THRESHOLD = REVIEW_CONFIDENCE_THRESHOLD
 const STRUCTURAL_FIELDS = Object.freeze({
   pagesPresent: 'integer',
   pagesTotal: 'integer',
+  // WHICH pages arrived, not merely how many. "5 of 7 pages" sends a borrower back through the
+  // whole statement; "page 6 is missing" is one tap. The model reports what the pages say about
+  // themselves ("Page 3 of 7"), so this is read, never inferred from the count.
+  pagesSeen: 'pagelist',
   side: 'side',
   documentDate: 'date',
   statementEnd: 'date',
@@ -373,6 +377,28 @@ function coerce(kind, raw) {
     case 'integer': {
       const n = Number(String(raw).replace(/[,\s]/g, ''))
       return Number.isInteger(n) && n >= 0 ? { ok: true, value: n } : { ok: false, reason: 'not_an_integer' }
+    }
+    case 'pagelist': {
+      // "1-5, 7" and "1,2,3,4,5,7" are the same fact, and a model will produce either. Ranges
+      // are expanded, duplicates dropped, order fixed — so completeness can do set arithmetic
+      // rather than string comparison.
+      const out = new Set()
+      for (const chunk of String(raw).split(/[,;]/)) {
+        const range = /^\s*(\d{1,4})\s*(?:-|–|—|to|through)\s*(\d{1,4})\s*$/i.exec(chunk)
+        if (range) {
+          const lo = Number(range[1]); const hi = Number(range[2])
+          // A backwards or absurd range is a misread, not a fact to expand into 900 pages.
+          if (lo < 1 || hi < lo || hi - lo > 500) return { ok: false, reason: 'not_a_page_list' }
+          for (let i = lo; i <= hi; i += 1) out.add(i)
+          continue
+        }
+        const one = /^\s*(\d{1,4})\s*$/.exec(chunk)
+        if (!one) { if (chunk.trim() === '') continue; return { ok: false, reason: 'not_a_page_list' } }
+        const n = Number(one[1])
+        if (n < 1) return { ok: false, reason: 'not_a_page_list' }
+        out.add(n)
+      }
+      return out.size ? { ok: true, value: [...out].sort((a, b) => a - b) } : { ok: false, reason: 'not_a_page_list' }
     }
     case 'number': {
       // "$3,214.50", "3214.50", "(1,200.00)" — parentheses are accounting negatives, which

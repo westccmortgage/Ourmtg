@@ -9,16 +9,12 @@
 // stay inside until a human releases them. A borrower uploading a pay stub still gets the useful
 // half automatically: the completeness check that tells them a page is missing.
 //
-// The ordering matters and mirrors application-turn's:
-//   1. authorize, then load the document          ← nothing is read for a file you cannot see
-//   2. read it (may time out, may be refused)
-//   3. validate against the contract              ← model output is untrusted
-//   4. store the extraction, superseding the old
-//   5. re-run every rule over the whole file
-//   6. replace pending findings, keep decided ones
+// This endpoint is now one of two callers of the same work: the borrower's upload queues the
+// identical read (pre-underwriting-read-worker), so a file gets read whether or not anyone
+// presses a button. What is internal-only is this SYNCHRONOUS, findings-returning view of it.
 //
-// A failure at 2 or 3 leaves the document exactly as it was: uploaded, unread, waiting. Nothing
-// a borrower sent is ever lost because a model was slow.
+// What it still owns is step 1 — authorize, then load the document, so nothing is read for a
+// file you cannot see. Steps 2 through 6 live in _lib/documentRead.mjs.
 
 import { admin, isConfigured } from './_lib/supabase.mjs'
 import {
@@ -28,19 +24,9 @@ import { readJsonBody, isUuid } from './_lib/requestGuard.mjs'
 import { isValidIdempotencyKey } from './_lib/idempotency.mjs'
 import { createRateLimiter } from './_lib/ratelimit.mjs'
 import { logEvent } from './_lib/safelog.mjs'
-import {
-  preUnderwritingEnabled, createDocumentIntake, readDocument,
-} from './_lib/documentIntake.mjs'
-import {
-  downloadDocument, saveExtraction, listExtractions, replaceFindings,
-  findingIds, newId,
-} from './_lib/preUnderwritingRepo.mjs'
-import { buildAnalysisContext } from '../../src/features/pre-underwriting/analysisContext.js'
-import { applicationFactsFromState } from '../../src/features/pre-underwriting/applicationFacts.js'
-import { runRules } from '../../src/features/pre-underwriting/rules.js'
-import {
-  createScanProvider, preUnderwritingScanRequired, scanDecision,
-} from './_lib/scan-provider.mjs'
+import { preUnderwritingEnabled } from './_lib/documentIntake.mjs'
+import { newId } from './_lib/preUnderwritingRepo.mjs'
+import { readAndAnalyse, NOT_MEANING } from './_lib/documentRead.mjs'
 
 // Reading a document is a model call against a whole PDF — far more expensive than a turn, and
 // nobody legitimately reads sixty documents a minute.
@@ -97,70 +83,14 @@ export default async (req) => {
       return json({ ok: false, error: 'Document not found' }, 404)
     }
 
-    // ── 2: fetch and read ──────────────────────────────────────────────────
-    const file = await downloadDocument(svc, document)
-    if (!file.ok) {
-      logEvent('pu.intake.unreadable', { severity: 'info', requestId: correlationId, code: file.code })
-      return json({ ok: false, error: MESSAGES[file.code] || 'This file could not be read.', code: file.code }, 422)
-    }
-
-    // A model must never be the first security control to parse an upload. Byte-signature
-    // verification happened in downloadDocument; an affirmative malware result is required by
-    // default before the document may cross the extraction-provider boundary.
-    let scanner
-    try { scanner = createScanProvider() }
-    catch {
-      return json({ ok: false, error: 'Document security scanning is not configured.', code: 'scan_not_configured' }, 503)
-    }
-    const scan = await scanner.scan({
-      bytes: Buffer.from(file.dataBase64, 'base64'),
-      detectedContentType: file.mediaType,
-      correlationId,
+    // ── 2–6: read it and re-analyse the file ───────────────────────────────
+    const result = await readAndAnalyse(svc, {
+      loanFile, document, actor: auth.user.id, correlationId,
     })
-    const scanGate = scanDecision(scan, { required: preUnderwritingScanRequired() })
-    if (!scanGate.ok) {
-      logEvent('pu.intake.scan_blocked', {
-        severity: scan.status === 'infected' ? 'warn' : 'error', requestId: correlationId,
-        code: scanGate.code, provider: scanner.name,
-      })
-      return json({ ok: false, error: scanGate.error, code: scanGate.code }, scanGate.status)
+    if (!result.ok) {
+      return json({ ok: false, error: result.error, code: result.code }, result.status)
     }
-
-    let intake
-    try {
-      intake = createDocumentIntake()
-    } catch {
-      return json({ ok: false, error: 'Document reading is not configured.', code: 'provider_not_configured' }, 503)
-    }
-
-    const read = await readDocument(intake, {
-      mediaType: file.mediaType,
-      dataBase64: file.dataBase64,
-      // What the checklist says it should be. Offered as context; the model classifies from the
-      // page, and a confident disagreement is surfaced rather than smoothed over.
-      expectedDocKey: document.doc_key || null,
-      correlationId,
-    })
-    if (!read.ok) {
-      return json({
-        ok: false,
-        error: MESSAGES[read.error?.code] || 'The document could not be read just now. Nothing was lost — try again.',
-        code: read.error?.code || 'read_failed',
-      }, read.error?.code === 'unsupported_media_type' ? 422 : 502)
-    }
-
-    // ── 4: store ───────────────────────────────────────────────────────────
-    const extraction = await saveExtraction(svc, {
-      loanFile, document, value: read.value, meta: read.meta, actor: auth.user.id,
-    })
-
-    // ── 5 + 6: re-analyse the whole file ───────────────────────────────────
-    // Whole file, not just this document: a new pay stub can contradict a W-2 that was already
-    // on file, and a rule that only ever saw one document at a time would never notice.
-    // The borrower's own answers ride along — without them undisclosedLiabilities compares the
-    // report against nothing and calls every declared debt undisclosed.
-    const application = await applicationFactsForFile(svc, loanFile)
-    const analysis = await reanalyse(svc, { loanFile, application, correlationId })
+    const { extraction, read, analysis } = result
 
     await logAccess(svc, {
       portalUser: auth.user.id, loanFileId: loanFile.id,
@@ -193,62 +123,3 @@ export default async (req) => {
     return json({ ok: false, error: 'Could not process that document.', requestId: correlationId }, 500)
   }
 }
-
-/**
- * Re-run every rule over everything currently known about the file.
- *
- * Exported so the review endpoint can do the same thing after a correction — one definition of
- * "analyse this file", not two that drift.
- */
-/** The borrower's 1003 answers for this file, or {} when no application exists yet. */
-export async function applicationFactsForFile(svc, loanFile) {
-  const { data: app } = await svc
-    .from('mortgage_applications')
-    .select('id')
-    .eq('loan_file_id', loanFile.id)
-    .order('application_version', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  if (!app) return {}
-  const { data: state } = await svc
-    .from('application_field_state')
-    .select('field_path, normalized_value, status')
-    .eq('application_id', app.id)
-  return applicationFactsFromState(state || [])
-}
-
-export async function reanalyse(svc, { loanFile, application = {}, correlationId }) {
-  const extractions = await listExtractions(svc, loanFile.id)
-  const ctx = buildAnalysisContext({
-    extractions,
-    application,
-    id: findingIds(loanFile.id),
-  })
-  const { findings, errors } = runRules(ctx)
-  if (errors.length) {
-    // A rule that throws is contained upstream; it is logged here so a silently missing finding
-    // is discoverable rather than merely absent.
-    logEvent('pu.rules.error', { severity: 'error', requestId: correlationId, rules: errors.map((e) => e.rule) })
-  }
-  const written = await replaceFindings(svc, { loanFile, findings, runId: correlationId })
-  return { produced: findings.length, ...written, ruleErrors: errors.length }
-}
-
-const MESSAGES = {
-  not_uploaded: 'That document has been requested but nothing has been uploaded yet.',
-  download_failed: 'The stored file could not be opened.',
-  empty_file: 'That file is empty.',
-  file_too_large: 'That file is too large to read. A scan under 20 MB works best.',
-  unsupported_file_content: 'The uploaded file is not a supported PDF, JPG, PNG, or HEIC document.',
-  content_type_mismatch: 'The uploaded file contents do not match its reported file type.',
-  unsupported_media_type: 'That file type cannot be read. PDF, JPEG, PNG, or WEBP — an iPhone photo may need converting from HEIC.',
-  refusal: 'The reader declined this document. A person should open it.',
-  max_tokens: 'That document is too long to read in one pass.',
-}
-
-export const NOT_MEANING = Object.freeze([
-  'an approval or a pre-approval',
-  'a credit decision',
-  'an underwriting opinion',
-  'a commitment to lend',
-])

@@ -58,14 +58,27 @@ export function assessCompleteness(docKey, parts, opts = {}) {
   // rest, and the missing pages are exactly where the transactions live.
   if (rules.allPages) {
     for (const it of items) {
-      const seen = Number(it.pagesPresent)
       const total = Number(it.pagesTotal)
-      if (Number.isFinite(total) && Number.isFinite(seen) && seen < total) {
-        gaps.push({
-          code: 'missing_pages',
-          message: `One upload has ${seen} of ${total} pages — please send the complete document, including pages that look blank.`,
-        })
-      }
+      if (!Number.isFinite(total) || total <= 0) continue
+      const seenList = Array.isArray(it.pagesSeen)
+        ? it.pagesSeen.filter((n) => Number.isInteger(n) && n >= 1 && n <= total)
+        : null
+      const seen = seenList ? seenList.length : Number(it.pagesPresent)
+      if (!Number.isFinite(seen) || seen >= total) continue
+
+      // Naming the page is the whole difference between one tap and re-scanning a statement.
+      // We can only do it when the pages said which ones they were; otherwise we fall back to
+      // the count, which is still true, just less useful.
+      const missing = seenList
+        ? Array.from({ length: total }, (_, i) => i + 1).filter((n) => !seenList.includes(n))
+        : null
+      const what = describe(type, it)
+      gaps.push({
+        code: 'missing_pages',
+        message: missing && missing.length
+          ? `We received ${pagesPhrase(seenList)} of ${what}. ${missing.length === 1 ? 'Page' : 'Pages'} ${pageList(missing)} ${missing.length === 1 ? 'is' : 'are'} still missing — please upload ${missing.length === 1 ? 'it' : 'them'}.`
+          : `We received ${seen} of ${total} pages of ${what} — please send the complete document, including pages that look blank.`,
+      })
     }
   }
 
@@ -285,6 +298,63 @@ export function documentReadiness(checklist, byType, opts = {}) {
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * What this upload is, in the borrower's terms: "your July Chase statement", "your ID".
+ *
+ * A request naming the actual document is one the borrower can act on without opening anything
+ * to work out which of four statements we mean. Every component is optional, because every one
+ * of them is something the model may legitimately have failed to read — and a half-known
+ * description is still better than "one upload".
+ */
+function describe(type, item) {
+  const parts = []
+  const month = monthName(item?.statementMonth)
+  if (month) parts.push(month)
+  const who = String(item?.institutionName || item?.employerName || item?.carrierName || '').trim()
+  // Keep it short: "Chase", not "JPMorgan Chase Bank, N.A. Member FDIC".
+  if (who) parts.push(who.split(/[,(]/)[0].trim().split(/\s+/).slice(0, 3).join(' '))
+  const noun = SHORT_NOUN[type.key] || type.label.toLowerCase()
+  return parts.length ? `your ${parts.join(' ')} ${noun}` : `your ${noun}`
+}
+
+// The label a borrower would use, where the catalog's own label is a filing name.
+const SHORT_NOUN = Object.freeze({
+  bank_2mo: 'statement',
+  bank_12mo: 'statement',
+  reserves: 'account statement',
+  paystubs_30d: 'pay stub',
+  w2_2yr: 'W-2',
+  mortgage_statement: 'mortgage statement',
+  purchase_contract: 'purchase contract',
+  tax_return_full: 'tax return',
+  id_photo: 'ID',
+})
+
+const monthName = (ym) => {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(ym || ''))
+  if (!m) return null
+  const mon = Number(m[2])
+  return mon >= 1 && mon <= 12 ? MONTHS[mon - 1] : null
+}
+
+/** [1,2,3,4,5,7] → "pages 1–5 and 7". Ranges, because a list of eleven numbers is unreadable. */
+function pageList(pages) {
+  const runs = []
+  for (const n of pages) {
+    const last = runs[runs.length - 1]
+    if (last && n === last[1] + 1) last[1] = n
+    else runs.push([n, n])
+  }
+  // A run always takes the dash, even a run of two: "2 and 3 and 5" reads as three separate
+  // pages, while "2\u20133 and 5" reads as what it is.
+  const parts = runs.map(([a, b]) => (a === b ? String(a) : `${a}\u2013${b}`))
+  if (parts.length === 1) return parts[0]
+  return parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1]
+}
+
+/** "page 6" / "pages 1\u20135 and 7" \u2014 the noun agrees with how many there actually are. */
+const pagesPhrase = (pages) => `${pages.length === 1 ? 'page' : 'pages'} ${pageList(pages)}`
 
 // bureausIncluded arrives as an array from a structured read, or as "Equifax, Experian,
 // TransUnion" from a line of text. Both are the same fact.

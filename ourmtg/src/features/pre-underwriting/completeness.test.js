@@ -50,6 +50,66 @@ test('missing pages are caught even when the months look right', () => {
   assert.ok(codes(r).includes('missing_pages'))
 })
 
+test('when the read said which pages arrived, the request names the missing one', () => {
+  // "Some pages are missing" costs the borrower a re-scan of the whole statement and a phone
+  // call to find out which. Naming page 6 costs them one photograph.
+  const r = assessCompleteness('bank_2mo', [
+    stmt('2026-06', { pagesSeen: [1, 2, 3, 4, 5, 7], pagesTotal: 7, institutionName: 'Chase Bank' }),
+    stmt('2026-07', { pagesSeen: [1, 2, 3, 4, 5, 6, 7], pagesTotal: 7 }),
+  ], at)
+  assert.equal(r.complete, false)
+  const msg = r.gaps.find((g) => g.code === 'missing_pages').message
+  assert.match(msg, /pages 1–5 and 7/)
+  assert.match(msg, /Page 6 is still missing/)
+  // The document has to be identifiable, or a borrower with four statements cannot act on it.
+  assert.match(msg, /June Chase Bank statement/)
+  // One gap, not one per statement: July is whole.
+  assert.equal(r.gaps.filter((g) => g.code === 'missing_pages').length, 1)
+})
+
+test('several missing pages read as a list, and the verb agrees', () => {
+  const r = assessCompleteness('bank_2mo', [
+    stmt('2026-06', { pagesSeen: [1, 4], pagesTotal: 5, institutionName: 'Wells Fargo Bank, N.A.' }),
+    stmt('2026-07'),
+  ], at)
+  const msg = r.gaps.find((g) => g.code === 'missing_pages').message
+  assert.match(msg, /Pages 2\u20133 and 5 are still missing/)
+  assert.match(msg, /please upload them/)
+  // The institution is shortened to what a person would say out loud.
+  assert.match(msg, /June Wells Fargo Bank statement/)
+})
+
+test('without a page list we still ask, we just cannot name the page', () => {
+  // The honest fallback. Inventing which page is missing would be exactly the kind of
+  // uncertainty-turned-into-fact this system is not allowed to produce.
+  const r = assessCompleteness('bank_2mo', [
+    stmt('2026-06', { pagesPresent: 2, pagesTotal: 7 }), stmt('2026-07'),
+  ], at)
+  const msg = r.gaps.find((g) => g.code === 'missing_pages').message
+  assert.match(msg, /We received 2 of 7 pages/)
+  assert.ok(!/Page \d+ is still missing/.test(msg), msg)
+})
+
+test('a page list that covers the document is not a gap', () => {
+  const r = assessCompleteness('bank_2mo', [
+    stmt('2026-06', { pagesSeen: [1, 2, 3], pagesTotal: 3 }),
+    stmt('2026-07', { pagesSeen: [3, 1, 2], pagesTotal: 3 }),
+  ], at)
+  assert.ok(!codes(r).includes('missing_pages'), JSON.stringify(r.gaps))
+})
+
+test('a page number the document cannot have is ignored rather than trusted', () => {
+  // pagesSeen comes from a model. If it claims page 9 of a 3-page statement, that is a misread,
+  // and counting it would mark an incomplete document complete.
+  const r = assessCompleteness('bank_2mo', [
+    stmt('2026-06', { pagesSeen: [1, 2, 9], pagesTotal: 3 }),
+    stmt('2026-07'),
+  ], at)
+  const msg = r.gaps.find((g) => g.code === 'missing_pages').message
+  assert.match(msg, /Page 3 is still missing/)
+  assert.ok(!msg.includes('9'), msg)
+})
+
 test('old statements are flagged as stale', () => {
   const r = assessCompleteness('bank_2mo', [stmt('2025-11'), stmt('2025-12')], at)
   assert.ok(codes(r).includes('stale'))

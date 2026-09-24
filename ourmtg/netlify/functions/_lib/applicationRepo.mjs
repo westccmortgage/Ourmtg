@@ -26,15 +26,27 @@ export function currentMonth(now = new Date()) {
  * concurrent first-turns: a unique (loan_file_id, application_version) means the loser of a
  * race re-reads instead of producing a second application.
  */
-export async function ensureApplication(svc, { loanFile, createdBy, locale = 'en' }) {
-  const { data: existing, error } = await svc
+/**
+ * The file's current application, or null.
+ *
+ * Read-only on purpose. A background job that reports on a file must not bring an application
+ * into existence as a side effect of looking: a loan file with no application is a real state,
+ * and "there is nothing to report yet" is the honest answer to it.
+ */
+export async function findApplication(svc, loanFileId) {
+  const { data, error } = await svc
     .from('mortgage_applications')
     .select('*')
-    .eq('loan_file_id', loanFile.id)
+    .eq('loan_file_id', loanFileId)
     .order('application_version', { ascending: false })
     .limit(1)
     .maybeSingle()
   if (error) throw new Error('application read: ' + error.message)
+  return data || null
+}
+
+export async function ensureApplication(svc, { loanFile, createdBy, locale = 'en' }) {
+  const existing = await findApplication(svc, loanFile.id)
   if (existing) return existing
 
   const insert = {

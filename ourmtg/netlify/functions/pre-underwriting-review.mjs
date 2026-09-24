@@ -28,7 +28,7 @@ import { preUnderwritingEnabled } from './_lib/documentIntake.mjs'
 import {
   listExtractions, listFindings, listAuthorizations, listDocuments, newId,
 } from './_lib/preUnderwritingRepo.mjs'
-import { reanalyse, NOT_MEANING } from './pre-underwriting-intake.mjs'
+import { reanalyse, NOT_MEANING } from './_lib/documentRead.mjs'
 import { buildAnalysisContext } from '../../src/features/pre-underwriting/analysisContext.js'
 import { preUnderwritingChecklist } from './_lib/checklist.mjs'
 import { groupParts } from '../../src/features/pre-underwriting/extractionContract.js'

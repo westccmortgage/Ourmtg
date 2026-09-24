@@ -13,6 +13,8 @@ import { readJsonBody, isUuid, docTaskLinkDecision } from './_lib/requestGuard.m
 import { isValidIdempotencyKey, requestHash } from './_lib/idempotency.mjs'
 import { inspectDocumentBytes } from './_lib/upload-policy.mjs'
 import { createScanProvider, documentScanRequired, scanDecision } from './_lib/scan-provider.mjs'
+import { enqueueRead } from './_lib/readQueue.mjs'
+import { preUnderwritingEnabled } from './_lib/documentIntake.mjs'
 
 const BUCKET = 'ourmtg-docs'
 const OURMTG_URL = (process.env.OURMTG_URL || 'https://ourmtg.com').replace(/\/$/, '')
@@ -137,6 +139,27 @@ export default async (req) => {
 
   const internalUpload = isInternal(access)
   const uploaderRole = internalUpload ? 'loan_team' : (access.visibility === 'coborrower' ? 'coborrower' : 'borrower')
+
+  // The upload is what makes the read owed. Until this line a document sat unread until an
+  // internal user opened the panel and pressed a button — which is the human step that made
+  // every routine iteration cost somebody an afternoon.
+  //
+  // Enqueued, not performed: a read is a model call against a whole PDF, and this function is
+  // frozen the moment it responds. Work started here and not awaited would be killed mid-flight
+  // on exactly the uploads that matter, silently. A row survives that.
+  //
+  // Fail-soft by design. The document IS uploaded; reporting failure because a queue insert
+  // failed would tell the borrower to re-send a file we already have. A dropped enqueue costs a
+  // delayed read, which the panel's manual read and the next upload both recover from.
+  let queuedRead = false
+  if (preUnderwritingEnabled()) {
+    const enq = await enqueueRead(svc, {
+      loanFile, document: doc,
+      requestedBy: internalUpload ? 'loan_team' : 'borrower_upload',
+    })
+    queuedRead = enq.ok
+    if (!enq.ok) console.error('[portal-doc-complete] read enqueue failed:', enq.reason)
+  }
   try {
     await svc.from('loan_messages').insert({
       loan_file_id: doc.loan_file_id,
@@ -197,5 +220,10 @@ export default async (req) => {
     } catch { /* existing email is fail-soft */ }
   }
 
-  return json({ ok: true, documentId: doc.id, status: 'uploaded', ...(taskTransition ? { taskTransition } : {}) })
+  // `reading` says a read is owed, never what it found. What the borrower does with it is show
+  // "we're reviewing this" instead of a silent screen while the worker catches up.
+  return json({
+    ok: true, documentId: doc.id, status: 'uploaded', reading: queuedRead,
+    ...(taskTransition ? { taskTransition } : {}),
+  })
 }
