@@ -26,6 +26,9 @@ const CATEGORY_LABEL = {
   identity: 'Identity', property: 'Property', documents: 'Documents',
 }
 
+const SECTION_WORD = { complete: 'done', needs_attention: 'open', in_review: 'in review', not_applicable: 'n/a' }
+const SECTION_CHIP = { complete: 'green', needs_attention: 'red', in_review: 'gray', not_applicable: 'gray' }
+
 export default function PreUnderwritingPanel() {
   const { loanFileId } = useParams()
   const [data, setData] = useState(null)
@@ -45,7 +48,7 @@ export default function PreUnderwritingPanel() {
   if (error && !data) return <Alert kind="error">{error}</Alert>
   if (!data) return <p className="muted">Reading the file…</p>
 
-  const { readiness, regulatory, missing, findings, programs, credit, unread, facts, liabilitySync, taxIncome } = data
+  const { readiness, operational, sections, regulatory, missing, findings, programs, credit, unread, facts, liabilitySync, taxIncome } = data
   const open = findings.filter((f) => f.status === 'pending_review')
   const decided = findings.filter((f) => f.status !== 'pending_review')
 
@@ -60,28 +63,71 @@ export default function PreUnderwritingPanel() {
 
       {error && <Alert kind="error">{error}</Alert>}
 
-      {/* ── Readiness ─────────────────────────────────────────────────────── */}
-      <div className="card">
-        <div className="card-head">
-          <h2>Loan readiness</h2>
-          <span className="chip gray">{readiness.percent}%</span>
+      {/* ── Operational completeness ──────────────────────────────────────── */}
+      {/* ONE number on this screen, and it is the same one the borrower sees, because both come
+          from the same fileTasks computation. There used to be a second, differently-weighted
+          percentage here; two numbers next to one borrower's name is how a processor and a
+          borrower end up describing the same file differently on a phone call. */}
+      {operational && (
+        <div className="card">
+          <div className="card-head">
+            <h2>Operationally complete</h2>
+            <span className="chip gray">{operational.percent}%</span>
+          </div>
+          <div className="c1003-bar" role="progressbar" aria-valuenow={operational.percent} aria-valuemin={0} aria-valuemax={100}>
+            <span style={{ width: `${operational.percent}%` }} />
+          </div>
+          <p className="muted" style={{ fontSize: 13.5, marginBottom: 4 }}>{operational.meaning}</p>
+          <p className="hint" style={{ marginTop: 0 }}>
+            It is <b>not</b> {operational.notMeaning.join(', not ')}. A file at 100% can still
+            be denied; a file at 40% can close.
+          </p>
+          <div className="metrics" style={{ marginTop: 12 }}>
+            <Metric label="Borrower to do" v={null} extra={`${operational.borrowerOutstanding} open`} />
+            <Metric label="Loan team to do" v={null} extra={`${operational.teamOutstanding} open`} />
+            <Metric label="For your review" v={null} extra={`${operational.humanReview} to review`} />
+          </div>
         </div>
-        <div className="c1003-bar" role="progressbar" aria-valuenow={readiness.percent} aria-valuemin={0} aria-valuemax={100}>
-          <span style={{ width: `${readiness.percent}%` }} />
+      )}
+
+      {/* ── By section ────────────────────────────────────────────────────── */}
+      {sections?.length > 0 && (
+        <div className="card">
+          <div className="card-head">
+            <h2>By section</h2>
+            <Link className="btn btn-ghost btn-sm" to={`/portal/file/${loanFileId}/handoff`}>ARIVE entry sheet</Link>
+          </div>
+          {sections.map((s) => (
+            <div className="row" key={s.key}>
+              <div className="grow">
+                <div className="rlabel">{s.title}</div>
+                <div className="rsub muted">
+                  {s.state === 'not_applicable' ? 'Not required on this file'
+                    : s.open > 0 ? `${s.borrowerOpen} for the borrower · ${s.teamOpen} for the loan team`
+                      : s.review > 0 ? `${s.review} item${s.review === 1 ? '' : 's'} for your review`
+                        : 'Nothing outstanding'}
+                </div>
+              </div>
+              <div style={{ flex: '0 0 auto' }}>
+                <span className={`chip ${SECTION_CHIP[s.state] || 'gray'}`}>{SECTION_WORD[s.state] || s.state}</span>
+              </div>
+            </div>
+          ))}
         </div>
-        <p className="muted" style={{ fontSize: 13.5, marginBottom: 4 }}>{readiness.meaning}</p>
-        {/* Travels with the number, always. A percentage next to somebody's name gets read as a
-            probability of approval by someone, eventually, however it is labelled. */}
-        <p className="hint" style={{ marginTop: 0 }}>
-          It is <b>not</b> {readiness.notMeaning.join(', ')}. A file at 100% can still be denied;
-          a file at 40% can close.
-        </p>
+      )}
+
+      {/* The per-component breakdown, kept because "which half is the file weak in" is a real
+          question — but without a headline percentage of its own. */}
+      <details className="card">
+        <summary className="spread" style={{ cursor: 'pointer', listStyle: 'none' }}>
+          <b>How the file is doing, by component</b>
+        </summary>
         <div className="metrics" style={{ marginTop: 12 }}>
           <Metric label="Documents" v={readiness.components.documents} extra={`${readiness.components.documents.complete}/${readiness.components.documents.total}`} />
           <Metric label="Open questions" v={readiness.components.questions} extra={`${readiness.components.questions.open} open`} />
           <Metric label="Read quality" v={readiness.components.confidence} extra={`${readiness.components.confidence.readings} values`} />
         </div>
-      </div>
+      </details>
 
       {regulatory && (
         <details className="card">
@@ -545,12 +591,15 @@ const money = (n) => typeof n === 'number' ? `$${Math.round(n).toLocaleString('e
 
 const fmt = (n) => (typeof n === 'number' ? `$${Math.round(n).toLocaleString('en-US')}` : String(n))
 
+// Some of these are shares and some are counts. A count rendered through a percentage slot
+// comes out as a bare "%", which reads as a broken number rather than as a count of zero.
 function Metric({ label, v, extra }) {
+  const share = typeof v?.percent === 'number'
   return (
     <div className="metric">
       <span className="lbl">{label}</span>
-      <span className="big-num">{v.percent}%</span>
-      <span className="lbl">{extra}</span>
+      <span className="big-num">{share ? `${v.percent}%` : extra}</span>
+      <span className="lbl">{share ? extra : ''}</span>
     </div>
   )
 }

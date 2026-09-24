@@ -12,6 +12,7 @@
 // a console-error report to the scratch dir, exits non-zero if any page hard-errored)
 
 import { createServer } from 'node:http'
+import { execFileSync } from 'node:child_process'
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join, extname } from 'node:path'
 import { setTestEnv } from './_fakeSupabase.mjs'
@@ -19,6 +20,36 @@ import { LOAN, OWNER, BORROWER, USERS, DOCS, routedModel, buildWorld } from './_
 
 const ROOT = new URL('..', import.meta.url).pathname
 const DIST = join(ROOT, 'dist')
+const ORIGIN = 'http://127.0.0.1:8787'
+
+// The harness builds its OWN bundle.
+//
+// It used to run against whatever was in dist/, which made it quietly dependent on how that
+// build happened to be invoked: a `npm run build` without the VITE_FF_* flags produces a bundle
+// where the pre-underwriting and 1003 routes DO NOT EXIST, and every page under them renders
+// "Page not found" — while the harness reports it as a missing selector, which reads like a
+// broken screen rather than a bundle built with the feature off. Worse, a build without
+// VITE_SUPABASE_* produces a bundle that cannot sign anyone in, so every page renders the login
+// screen and every assertion fails for a reason that has nothing to do with the code.
+//
+// Building here removes the ambiguity: what the browser loads is what this file asked for.
+if (!process.env.UI_SKIP_BUILD) {
+  console.log('building the bundle the browser will load…')
+  execFileSync('npm', ['run', 'build'], {
+    cwd: ROOT,
+    stdio: ['ignore', 'ignore', 'inherit'],
+    env: {
+      ...process.env,
+      // The browser talks to this harness for auth/rest/storage; the bridge below forwards it
+      // to the same fake database the functions use.
+      VITE_SUPABASE_URL: ORIGIN,
+      VITE_SUPABASE_ANON_KEY: 'anon-key',
+      // Presentation flags. They mount routes; every function still checks its own server flag.
+      VITE_FF_PRE_UNDERWRITING: 'true',
+      VITE_FF_CONVERSATIONAL_1003: 'true',
+    },
+  })
+}
 const OUT = process.env.UI_OUT || '/tmp/claude-0/-home-user-Ourmtg/afdd5109-bb40-5af9-ba17-71bf0e976bb9/scratchpad/ui'
 mkdirSync(OUT, { recursive: true })
 
@@ -175,20 +206,42 @@ async function visit(persona, token, id, email, pages) {
   }, [SESSION(token, id, email)])
   const page = await ctx.newPage()
   const errors = []
-  page.on('console', (m) => { if (m.type() === 'error') errors.push(`[console] ${m.text().slice(0, 300)}`) })
+  // This sandbox's egress proxy refuses fonts.googleapis.com with ERR_CERT_AUTHORITY_INVALID.
+  // It is an environment limit, not a defect in the page — the site renders in system fonts and
+  // nothing else changes. It is filtered NARROWLY (that host, that error) so that a real cert
+  // failure against any other origin still fails the run. Recorded either way, under `blocked`,
+  // so a reader of the report can see it happened rather than wondering what was hidden.
+  const blocked = []
+  const isSandboxFont = (u, t) => /fonts\.(googleapis|gstatic)\.com/.test(u) && /ERR_CERT_AUTHORITY_INVALID/.test(t || '')
+  page.on('console', (m) => {
+    const t = m.text()
+    if (m.type() !== 'error') return
+    // Chromium reports the blocked stylesheet twice: once as a failed request, once as a bare
+    // "Failed to load resource" with no URL. The pair is only distinguishable together.
+    if (/Failed to load resource/.test(t) && blocked.length) { blocked.push(`[console] ${t}`); return }
+    errors.push(`[console] ${t.slice(0, 300)}`)
+  })
   page.on('pageerror', (e) => errors.push(`[pageerror] ${String(e).slice(0, 300)}`))
-  page.on('requestfailed', (r) => { if (!/favicon/.test(r.url())) errors.push(`[requestfailed] ${r.url().slice(0, 160)} ${r.failure()?.errorText}`) })
+  page.on('requestfailed', (r) => {
+    if (/favicon/.test(r.url())) return
+    const text = r.failure()?.errorText
+    const line = `[requestfailed] ${r.url().slice(0, 160)} ${text}`
+    if (isSandboxFont(r.url(), text)) blocked.push(line)
+    else errors.push(line)
+  })
 
   for (const [name, path, ready] of pages) {
     errors.length = 0
+    blocked.length = 0
     await page.goto(`http://127.0.0.1:8787${path}`, { waitUntil: 'networkidle' }).catch((e) => errors.push(`[goto] ${e}`))
     if (ready) await page.waitForSelector(ready, { timeout: 8000 }).catch(() => errors.push(`[missing] expected "${ready}" on ${path}`))
     await page.waitForTimeout(400)
     const shot = join(OUT, `${persona}-${name}.png`)
     await page.screenshot({ path: shot, fullPage: true }).catch(() => {})
     const text = (await page.evaluate(() => document.body.innerText).catch(() => '')).slice(0, 20000)
-    report.push({ persona, name, path, errors: [...errors], text })
-    console.log(`${persona} ${name}: ${errors.length ? `${errors.length} error(s)` : 'clean'}`)
+    report.push({ persona, name, path, errors: [...errors], blocked: [...blocked], text })
+    console.log(`${persona} ${name}: ${errors.length ? `${errors.length} error(s)` : 'clean'}`
+      + (blocked.length ? ` (${blocked.length} sandbox-blocked font request(s))` : ''))
   }
   await ctx.close()
 }
@@ -196,7 +249,8 @@ async function visit(persona, token, id, email, pages) {
 await visit('lo', 'tok-owner', OWNER, 'lo@wcc.com', [
   ['dashboard', '/portal', 'text=Loan team dashboard'],
   ['file', `/portal/file/${LOAN}`, 'text=Documents'],
-  ['pre-underwriting', `/portal/file/${LOAN}/pre-underwriting`, 'text=Loan readiness'],
+  ['pre-underwriting', `/portal/file/${LOAN}/pre-underwriting`, 'text=Operationally complete'],
+  ['arive-handoff', `/portal/file/${LOAN}/handoff`, 'text=ARIVE entry sheet'],
   ['team-1003', `/portal/file/${LOAN}/application`, 'text=Conversational application'],
   ['take-1003', `/portal/file/${LOAN}/application/take`, 'text=Take this application'],
   ['application-entry', '/application', null],
@@ -205,6 +259,7 @@ await visit('borrower', 'tok-borrower', BORROWER, 'daria@example.com', [
   ['portal', '/portal', null],
   ['assistant', `/application/assistant/${LOAN}`, null],
   ['documents', `/portal/documents/${LOAN}`, null],
+  ['workspace', `/portal/workspace/${LOAN}`, 'text=Your application'],
 ])
 
 writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2))

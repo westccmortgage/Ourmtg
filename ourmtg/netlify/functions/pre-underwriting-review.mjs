@@ -29,6 +29,7 @@ import {
   listExtractions, listFindings, listAuthorizations, listDocuments, newId,
 } from './_lib/preUnderwritingRepo.mjs'
 import { reanalyse, NOT_MEANING } from './_lib/documentRead.mjs'
+import { loadFileState } from './_lib/fileState.mjs'
 import { buildAnalysisContext } from '../../src/features/pre-underwriting/analysisContext.js'
 import { preUnderwritingChecklist } from './_lib/checklist.mjs'
 import { groupParts } from '../../src/features/pre-underwriting/extractionContract.js'
@@ -207,6 +208,12 @@ async function panel(svc, { loanFile, req, auth }) {
     checklist, byType, findings, extractions: ctx.extractions,
   })
 
+  // THE headline number, and the same one the borrower's workspace shows — because it is the
+  // same computation, run once, in fileTasks. `readiness` above stays as a per-component
+  // breakdown (documents, open questions, read quality); what it no longer is, anywhere, is a
+  // second percentage next to a borrower's name that disagrees with the first one.
+  const unified = await loadFileState(svc, loanFile)
+
   // The four numbers everything downstream turns on, derived from what was READ rather than
   // from the application alone. Without this the program list runs on an empty file and cheerfully
   // reports that every program fits — which is what it did until a smoke test said so out loud.
@@ -280,6 +287,12 @@ async function panel(svc, { loanFile, req, auth }) {
 
   return {
     ok: true,
+    operational: unified.operational,
+    sections: unified.sections,
+    tasks: unified.team,
+    borrowerTasks: unified.borrower,
+    readFailures: unified.reading.failed,
+    reading: unified.reading.pending.length,
     readiness,
     regulatory,
     // Split by who can act. A processor chasing a borrower for a credit report is a wasted day,

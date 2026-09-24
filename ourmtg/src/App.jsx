@@ -19,6 +19,8 @@ import ApplicationTeamReview from './features/conversational-1003/pages/Applicat
 import ShortLink1003 from './pages/ShortLink1003'
 import ApplicationEntry from './pages/ApplicationEntry'
 import PreUnderwritingPanel from './features/pre-underwriting/pages/PreUnderwritingPanel'
+import BorrowerWorkspace from './pages/BorrowerWorkspace'
+import AriveHandoff from './pages/AriveHandoff'
 import { conversational1003Enabled } from './features/conversational-1003/clientFlag'
 import { preUnderwritingEnabled } from './features/pre-underwriting/clientFlag'
 
@@ -81,8 +83,19 @@ export default function App() {
                 (docs/OURMTG-PRE-UNDERWRITING-BOUNDARY.md); the functions enforce that server-side
                 regardless of whether this route is mounted. */}
             {preUnderwritingEnabled() && (
-              <Route path="portal/file/:loanFileId/pre-underwriting"
-                element={<RequireWorkspaceSecurity><PreUnderwritingPanel /></RequireWorkspaceSecurity>} />
+              <>
+                <Route path="portal/file/:loanFileId/pre-underwriting"
+                  element={<RequireWorkspaceSecurity><PreUnderwritingPanel /></RequireWorkspaceSecurity>} />
+                {/* The borrower's one screen: what is outstanding, what to do next, and what we
+                    said. It renders the SAME array the panel above renders — the server picks
+                    the projection from who is asking, so the two cannot contradict each other. */}
+                <Route path="portal/workspace/:loanFileId"
+                  element={<RequireWorkspaceSecurity><BorrowerWorkspace /></RequireWorkspaceSecurity>} />
+                {/* The manual-entry worksheet for ARIVE. Internal-only, enforced server-side;
+                    nothing on it submits anything anywhere. */}
+                <Route path="portal/file/:loanFileId/handoff"
+                  element={<RequireWorkspaceSecurity><AriveHandoff /></RequireWorkspaceSecurity>} />
+              </>
             )}
             <Route path="*" element={<NotFound />} />
           </Route>

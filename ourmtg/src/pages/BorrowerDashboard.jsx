@@ -17,6 +17,7 @@ import ThirdPartyPanel from '../components/ThirdPartyPanel'
 import TeamContactCard from '../components/TeamContactCard'
 import { BorrowerStatementIncome } from '../components/StatementIncomePanel'
 import { conversational1003Enabled } from '../features/conversational-1003/clientFlag'
+import { preUnderwritingEnabled } from '../features/pre-underwriting/clientFlag'
 
 export default function BorrowerDashboard({ grants }) {
   const [active, setActive] = useState(grants[0]?.loan_file_id || null)
@@ -63,6 +64,19 @@ export default function BorrowerDashboard({ grants }) {
           </select>
         )}
       </div>
+
+      {/* The one screen that knows the whole answer. Above everything else because a borrower
+          who has to assemble "what's left" from a checklist card and a conditions card is a
+          borrower who will miss one of them. */}
+      {preUnderwritingEnabled() && (
+        <Link to={`/portal/workspace/${active}`} className="card linkcard">
+          <div className="card-head"><h2>What I still need to do</h2><span aria-hidden="true">→</span></div>
+          <p className="muted mb0">
+            Everything outstanding on your file in one place — documents, questions, and what we
+            asked you for most recently.
+          </p>
+        </Link>
+      )}
 
       {/* Phase 1B/1C (flag-gated): borrower "Needs your attention" at the very top. When the
           task pilot is on, it renders real tasks; otherwise it derives from checklist+conditions. */}

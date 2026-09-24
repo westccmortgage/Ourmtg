@@ -53,6 +53,16 @@ export const getStatus = (loanFileId) =>
 export const getChecklist = (loanFileId) =>
   call(`portal-checklist?loanFileId=${encodeURIComponent(loanFileId)}`)
 
+// The one canonical answer to "what does this file still need". Both the borrower's workspace
+// and the internal summary read it; the server picks the projection from who is asking, which
+// is why there is one function here and not two.
+export const getFileState = (loanFileId, locale = 'en') =>
+  call(`portal-file-state?loanFileId=${encodeURIComponent(loanFileId)}&locale=${encodeURIComponent(locale)}`)
+
+// The manual-entry worksheet. Internal-only; nothing here submits anything to ARIVE.
+export const getAriveHandoff = (loanFileId, locale = 'en') =>
+  call(`portal-arive-handoff?loanFileId=${encodeURIComponent(loanFileId)}&locale=${encodeURIComponent(locale)}`)
+
 export const getUploadUrl = (loanFileId, docKey, options = {}) =>
   call('portal-doc-upload-url', { method: 'POST', body: { loanFileId, docKey, ...options } })
 
