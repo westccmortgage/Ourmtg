@@ -69,6 +69,7 @@ export async function loadFileState(svc, loanFile, { locale = 'en' } = {}) {
 
   const built = buildFileTasks({
     report, checklist, byType, findings, credit, unread, locale,
+    borrowerName: loanFile.borrower_name || '',
   })
 
   return {

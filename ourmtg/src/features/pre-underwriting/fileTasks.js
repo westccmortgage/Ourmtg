@@ -102,15 +102,19 @@ export const DOCUMENT_SECTION = Object.freeze({
  * @param {Array}  [input.findings]      live pre-underwriting findings
  * @param {object} [input.credit]        { authorized: boolean, reason: string|null }
  * @param {Array}  [input.unread]        documents uploaded but not yet read
+ * @param {string} [input.borrowerName]  so a document in another name can be queried
  * @param {number} [input.asOf]
  * @returns {{tasks: Array, sections: Array, operational: object}}
  */
 export function buildFileTasks(input = {}) {
   const {
     report = null, checklist = [], byType = {}, findings = [], credit = null,
-    unread = [], asOf, locale = 'en',
+    unread = [], asOf, locale = 'en', borrowerName = '',
   } = input
-  const opts = asOf ? { asOf } : {}
+  // The name is what lets completeness ask "this statement is in a different name — is that
+  // you?". Without it that question can never be raised, so it is threaded rather than left to
+  // whichever caller happens to remember.
+  const opts = { ...(asOf ? { asOf } : {}), ...(borrowerName ? { borrowerName } : {}) }
   const tasks = []
 
   // ── Application answers ──────────────────────────────────────────────────

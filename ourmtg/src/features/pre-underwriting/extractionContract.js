@@ -493,6 +493,12 @@ export function toPart(validated) {
   if (!v || !v.docKey) return null
   const part = {}
   for (const f of v.fields) part[f.name] = f.value
+  // Carried alongside the fields because completeness has to be able to ask for a clearer copy,
+  // and "the reader could not make this out" is not something any single field records.
+  // `legible` and `docKeyMismatch` are response-level properties, never field names, so they
+  // cannot collide with an extracted value.
+  part.legible = v.legible !== false
+  part.docKeyMismatch = Boolean(v.docKeyMismatch)
   if (v.docKey === 'tax_return_full') {
     // Completeness needs the form inventory only to name missing years/forms. Confidence and
     // amounts stay in their own paths; no tax conclusion reaches the borrower checklist.

@@ -53,6 +53,53 @@ export function assessCompleteness(docKey, parts, opts = {}) {
     return { complete: false, gaps: [{ code: 'not_provided', message: `We still need your ${type.label.toLowerCase()}.` }] }
   }
 
+  // ── Things true of every document type ───────────────────────────────────
+  // Legibility, duplication and ownership are not properties of a bank statement or a pay stub
+  // in particular; they are properties of "a document somebody sent us", and checking them once
+  // here is what stops each new type having to remember them.
+
+  // A scan the reader could not make out. Asked for again rather than quietly treated as
+  // present: a document nobody can read has satisfied nothing, and counting it as satisfied is
+  // the failure mode this whole module exists to prevent.
+  const unreadable = items.filter((it) => it.legible === false)
+  if (unreadable.length) {
+    const what = describe(type, unreadable[0])
+    gaps.push({
+      code: 'illegible',
+      message: unreadable.length === 1
+        ? `We could not read ${what} clearly enough. Please send a clearer photo or scan — good light, all four corners in frame.`
+        : `We could not read ${unreadable.length} of your ${SHORT_NOUN[type.key] || type.label.toLowerCase()} uploads clearly enough. Please send clearer photos or scans.`,
+    })
+  }
+
+  // The same document sent twice. Not an error and not the borrower's fault — people re-send
+  // when they are not sure the first one arrived — but it IS worth saying, because otherwise a
+  // file quietly accrues two of everything and a processor opens both to find out.
+  const dupes = duplicateGroups(items)
+  if (dupes.length) {
+    gaps.push({
+      code: 'duplicate',
+      message: `It looks like ${dupes.length === 1 ? describe(type, dupes[0][0]) : 'some of these'} came through more than once. Nothing is wrong — you do not need to do anything.`,
+      informational: true,
+    })
+  }
+
+  // A document in somebody else's name. Phrased as a question and raised ONLY when nothing about
+  // the names overlaps, because a maiden name, a middle name, a nickname and a joint account all
+  // look like a mismatch to a string comparison — and telling a borrower their own statement is
+  // not theirs is worse than not asking at all.
+  if (opts.borrowerName) {
+    const foreign = items.filter((it) => namesClearlyDiffer(ownerNameOf(it), opts.borrowerName))
+    if (foreign.length) {
+      const who = String(ownerNameOf(foreign[0])).trim()
+      gaps.push({
+        code: 'ownership_unclear',
+        message: `${describe(type, foreign[0]).replace(/^your /, 'One document ')} is in the name ${who}. If that is you — a maiden name, a middle name, or a joint account — just let us know. If it belongs to someone else, please send yours instead.`,
+        needsConfirmation: true,
+      })
+    }
+  }
+
   // ── Pages ────────────────────────────────────────────────────────────────
   // Statements are the usual offender: people photograph the page with the balance and skip the
   // rest, and the missing pages are exactly where the transactions live.
@@ -252,7 +299,11 @@ export function assessCompleteness(docKey, parts, opts = {}) {
     }
   }
 
-  return { complete: gaps.length === 0, gaps: dedupe(gaps) }
+  // An informational gap is a remark, not an omission. A borrower who sent the same statement
+  // twice has sent everything; marking the document incomplete for it would leave the file
+  // permanently short of one item with no action that could ever close it.
+  const all = dedupe(gaps)
+  return { complete: all.every((g) => g.informational), gaps: all }
 }
 
 /**
@@ -390,3 +441,50 @@ const dedupe = (gaps) => {
   const seen = new Set()
   return gaps.filter((g) => (seen.has(g.message) ? false : (seen.add(g.message), true)))
 }
+
+/**
+ * Uploads that are the same document.
+ *
+ * Deliberately conservative: two parts are "the same" only when every identifying fact we have
+ * agrees AND there is at least one such fact. Two statements with nothing readable on them are
+ * not duplicates, they are two unread statements, and collapsing them would hide one.
+ */
+function duplicateGroups(items) {
+  const groups = new Map()
+  for (const it of items) {
+    const key = [
+      it.statementMonth, it.statementEnd, it.taxYear,
+      it.payPeriodStart, it.payPeriodEnd, it.periodEnd,
+      it.institutionName, it.employerName, it.carrierName,
+      it.side, it.pagesTotal,
+    ].map((v) => (v === undefined || v === null ? '' : String(v))).join('|')
+    // Nothing identifying was read. Cannot be called a duplicate of anything.
+    if (!/[^|]/.test(key)) continue
+    ;(groups.get(key) || groups.set(key, []).get(key)).push(it)
+  }
+  return [...groups.values()].filter((g) => g.length > 1)
+}
+
+const ownerNameOf = (it) => it?.accountHolder || it?.employeeName || it?.borrowerName
+  || it?.fullName || it?.insuredName || ''
+
+/**
+ * True only when two names share NOTHING.
+ *
+ * One shared token — a surname, a given name, even an initial-length match is deliberately not
+ * enough — means we say nothing. "Marcus Nguyen" vs "M. Nguyen-Tran" shares "Nguyen" only after
+ * splitting hyphens, so hyphens split. The bar for speaking up is high because the cost of a
+ * false positive is telling someone their own bank statement is not theirs.
+ */
+function namesClearlyDiffer(found, expected) {
+  const tokens = (s) => String(s || '').toLowerCase()
+    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .split(/[^a-z]+/).filter((t) => t.length > 1 && !NAME_NOISE.has(t))
+  const a = tokens(found)
+  const b = tokens(expected)
+  if (!a.length || !b.length) return false
+  return !a.some((t) => b.includes(t))
+}
+
+// Suffixes and titles carry no identity and would otherwise "match" two unrelated people.
+const NAME_NOISE = new Set(['mr', 'mrs', 'ms', 'dr', 'jr', 'sr', 'ii', 'iii', 'iv', 'and', 'or', 'the'])
