@@ -206,6 +206,13 @@ test('an upload reads itself, and the borrower is told which page is missing', a
     // Nobody from WCCM was involved: the only human act was the upload.
     assert.equal(fake.rowsOf('portal_access_log')
       .filter((l) => l.portal_user === OWNER).length, 0)
+    // …but the read is still on the record. A document opened with no audit entry at all is a
+    // read nobody can account for a year from now; the null actor IS the "it was the system".
+    const audited = fake.rowsOf('portal_access_log')
+      .filter((l) => l.action === 'pre_underwriting_intake_auto')
+    assert.equal(audited.length, 2, 'both automatic reads are audited')
+    assert.ok(audited.every((l) => l.portal_user === null))
+    assert.ok(audited.some((l) => String(l.target).startsWith(DOC)))
   } finally { restore() }
 })
 

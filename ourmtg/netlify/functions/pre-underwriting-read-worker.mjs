@@ -25,6 +25,7 @@
 
 import { admin, isConfigured } from './_lib/supabase.mjs'
 import { newId } from './_lib/preUnderwritingRepo.mjs'
+import { logAccess } from './_lib/portal.mjs'
 import { preUnderwritingEnabled } from './_lib/documentIntake.mjs'
 import { readAndAnalyse } from './_lib/documentRead.mjs'
 import { requeueStale, listQueued, claim, finish } from './_lib/readQueue.mjs'
@@ -97,6 +98,15 @@ async function runOne(svc, job, runId) {
     await finish(svc, job, { status: 'queued', code: 'exception', error: e?.message })
     return { failed: true }
   }
+
+  // Audited like every other read of a borrower's document. `portal_user` is null because no
+  // person did this — that null IS the record that it was the system, and a document read with
+  // no entry at all would be a read nobody can account for a year from now.
+  await logAccess(svc, {
+    portalUser: null, loanFileId: loanFile.id,
+    action: 'pre_underwriting_intake_auto',
+    target: `${document.id}:${read.ok ? 'read' : read.code}`,
+  })
 
   if (read.ok) {
     await finish(svc, job, { status: 'done' })
